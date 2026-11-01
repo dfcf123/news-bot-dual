@@ -13,12 +13,6 @@ TG_BOT_TOKEN_KRIM = os.environ.get("TG_BOT_TOKEN_KRIM")
 TG_CHAT_WORLD = os.environ.get("TG_CHAT_WORLD", "@dfcf1980")
 TG_CHAT_KRIM = os.environ.get("TG_CHAT_KRIM", "@kriminal_vestnik")
 
-MIN_INTERVAL = 1500
-MAX_INTERVAL = 2100
-
-HISTORY_WORLD = "published_world.txt"
-HISTORY_KRIM = "published_kriminal.txt"
-
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
@@ -84,19 +78,6 @@ def ochistit(tekst):
     tekst = re.sub(r"[ \t]+", " ", tekst)
     tekst = re.sub(r"\n\s*\n", "\n\n", tekst)
     return tekst.strip()
-
-
-def load_history(path):
-    if not os.path.exists(path):
-        return set()
-    with open(path, "r", encoding="utf-8") as f:
-        return set(line.strip() for line in f if line.strip())
-
-
-def save_history(path, history_set):
-    with open(path, "w", encoding="utf-8") as f:
-        for url in history_set:
-            f.write(url + "\n")
 
 
 def is_kriminal(zag, tekst):
@@ -221,13 +202,12 @@ def publikovat(token, chat_id, msg, foto_path=None, video_path=None):
     return False
 
 
-def obrabotat_kanal(name, token, chat_id, rss_list, history_file, strict_kriminal):
+def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
     log(f"=== {name} ===")
     if not token:
-        log(f"  ⚠ Токен не задан, пропускаю.")
+        log(f"  Токен не задан, пропускаю.")
         return False
     
-    history = load_history(history_file)
     zag = {"User-Agent": random.choice(USER_AGENTS)}
     vse = []
     for url in rss_list:
@@ -241,7 +221,7 @@ def obrabotat_kanal(name, token, chat_id, rss_list, history_file, strict_krimina
                 zagolovok = ochistit(entry.get("title", "").strip())
                 ssylka = entry.get("link", "").strip()
                 opisanie = ochistit(entry.get("description", entry.get("summary", "")).strip())
-                if zagolovok and len(zagolovok) > 10 and ssylka and ssylka not in history:
+                if zagolovok and len(zagolovok) > 10 and ssylka:
                     vse.append({"zagolovok": zagolovok, "ssylka": ssylka, "opisanie": opisanie})
         except Exception as e:
             log(f"  Ошибка RSS {url}: {e}")
@@ -286,19 +266,17 @@ def obrabotat_kanal(name, token, chat_id, rss_list, history_file, strict_krimina
         if put:
             ok = publikovat(token, chat_id, msg, foto_path=put if tip == "foto" else None, video_path=put if tip == "video" else None)
             if ok:
-                log(f"  ✅ Опубликовано: {novost['zagolovok'][:60]}")
-                history.add(novost["ssylka"])
-                save_history(history_file, history)
+                log(f"  Опубликовано: {novost['zagolovok'][:60]}")
                 return True
             else:
-                log(f"  ✗ Ошибка публикации")
+                log(f"  Ошибка публикации")
     
-    log(f"  ✗ Ни одна новость не подошла.")
+    log(f"  Ни одна новость не подошла.")
     return False
 
 
 if __name__ == "__main__":
     log("Запуск бота...")
-    obrabotat_kanal("Мировые", TG_BOT_TOKEN_WORLD, TG_CHAT_WORLD, RSS_WORLD, HISTORY_WORLD, False)
-    obrabotat_kanal("Криминал", TG_BOT_TOKEN_KRIM, TG_CHAT_KRIM, RSS_KRIM, HISTORY_KRIM, True)
+    obrabotat_kanal("Мировые", TG_BOT_TOKEN_WORLD, TG_CHAT_WORLD, RSS_WORLD, False)
+    obrabotat_kanal("Криминал", TG_BOT_TOKEN_KRIM, TG_CHAT_KRIM, RSS_KRIM, True)
     log("Готово.")
