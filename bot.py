@@ -19,7 +19,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
 ]
 
-# Расширенные списки RSS
 RSS_WORLD = [
     "https://ria.ru/export/rss2/archive/index.xml",
     "https://tass.ru/rss/v2.xml",
@@ -71,7 +70,6 @@ TEKST_SLOVA = ZAGOLOVOK_SLOVA + [
     "растрата", "аферист", "афера", "рэкет",
 ]
 
-# Для защиты от дублей — храним заголовки в памяти (в рамках одного запуска)
 seen_titles = set()
 
 
@@ -185,7 +183,6 @@ def skachat_fayl(url, tip="foto"):
 
 
 def otpravit_soobshenie(token, chat_id, text):
-    """Отправляет обычное текстовое сообщение (до 4096 символов)."""
     base = f"https://api.telegram.org/bot{token}/"
     try:
         r = requests.post(
@@ -199,23 +196,19 @@ def otpravit_soobshenie(token, chat_id, text):
 
 
 def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=None):
-    """Публикует новость: медиа с краткой подписью + полный текст отдельным сообщением."""
     base = f"https://api.telegram.org/bot{token}/"
     
-    # Краткая подпись для медиа (до 1000 символов)
     short_msg = f"<b>{zag}</b>\n\n{parts[0]}\n\n🔗 <a href='{ssylka}'>Читать полностью</a>"
     if len(short_msg) > 1000:
         short_msg = short_msg[:990] + "...</a>"
     
-    # Полное сообщение с текстом (до 4000 символов)
     full_msg = f"<b>{zag}</b>\n\n"
-    for p in parts[:6]:  # до 6 абзацев
+    for p in parts[:6]:
         full_msg += f"{p}\n\n"
     full_msg += f"🔗 <a href='{ssylka}'>Источник</a>"
     if len(full_msg) > 4000:
         full_msg = full_msg[:3990] + "...</a>"
     
-    # Сначала отправляем медиа с краткой подписью
     media_ok = False
     if video_path:
         try:
@@ -245,12 +238,10 @@ def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=No
         except:
             pass
     
-    # Если медиа не отправилось — отправляем хотя бы текст
     if not media_ok:
         return otpravit_soobshenie(token, chat_id, full_msg)
     
-    # Если медиа ушло — отправляем полный текст следом
-    time.sleep(1)  # небольшая пауза между сообщениями
+    time.sleep(1)
     otpravit_soobshenie(token, chat_id, full_msg)
     return True
 
@@ -275,7 +266,6 @@ def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
                 ssylka = entry.get("link", "").strip()
                 opisanie = ochistit(entry.get("description", entry.get("summary", "")).strip())
                 if zagolovok and len(zagolovok) > 10 and ssylka:
-                    # Проверка на дубликат по заголовку
                     if zagolovok not in seen_titles:
                         vse.append({"zagolovok": zagolovok, "ssylka": ssylka, "opisanie": opisanie})
         except Exception as e:
@@ -335,11 +325,11 @@ def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
 if __name__ == "__main__":
     log("Запуск бота...")
     
-    # Случайная задержка 0-15 минут, чтобы публикации не были строго по часам
-    delay = random.randint(0, 15) * 60
-    if delay > 0:
-        log(f"Случайная задержка {delay // 60} мин перед началом...")
-        time.sleep(delay)
+    # С вероятностью 40% пропускаем запуск — это даёт рандомный интервал 60-120 минут
+    # между публикациями без траты времени на sleep
+    if random.random() < 0.4:
+        log("Случайный пропуск запуска (рандомизация интервала).")
+        sys.exit(0)
     
     obrabotat_kanal("Мировые", TG_BOT_TOKEN_WORLD, TG_CHAT_WORLD, RSS_WORLD, False)
     obrabotat_kanal("Криминал", TG_BOT_TOKEN_KRIM, TG_CHAT_KRIM, RSS_KRIM, True)
