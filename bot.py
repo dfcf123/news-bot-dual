@@ -7,6 +7,7 @@ import requests
 import feedparser
 from datetime import datetime
 from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 
 TG_BOT_TOKEN_WORLD = os.environ.get("TG_BOT_TOKEN_WORLD")
 TG_BOT_TOKEN_KRIM = os.environ.get("TG_BOT_TOKEN_KRIM")
@@ -28,21 +29,21 @@ RSS_WORLD = [
     "https://vz.ru/rss",
 ]
 
-RSS_KRIM = [
-    "https://rg.ru/rss/rubric/criminal/",
-    "https://ren.tv/rss",
-    "https://russian.rt.com/rss",
-    "https://www.sb.by/rss/",
-    "https://news.onliner.by/feed",
-    "https://www.kp.ru/daily/incidents/rss/",
+# Для криминала: RSS + прямые HTML-разделы для глубокого поиска (до 2-3 недель назад)
+SOURCES_KRIM = [
     "https://www.mk.ru/incidents/rss.xml",
-    "https://mvd.gov.by/rss/",
     "https://newinform.com/rss",
-    "https://www.gazeta.ru/social/crime/rss.shtml",
-    "https://crimea.ria.ru/crime/rss/",
+    "https://rg.ru/rss/rubric/criminal/",
+    "https://russian.rt.com/rss",
     "https://www.vesti.ru/rss",
     "https://www.mzk2.ru/feed",
     "https://noctu.ru/feed",
+    # HTML-разделы для глубокого парсинга
+    "https://www.mk.ru/incidents/",
+    "https://newinform.com/category/proisshestviya/",
+    "https://rg.ru/rubric/criminal/",
+    "https://www.kp.ru/daily/incidents/",
+    "https://www.vesti.ru/incidents"
 ]
 
 ZAGOLOVOK_SLOVA = [
@@ -112,8 +113,20 @@ def skachat_stranitsu(ssylka):
         r.encoding = "utf-8"
         if r.status_code != 200:
             return None, None, None
-        from bs4 import BeautifulSoup
+        
         soup = BeautifulSoup(r.text, "html.parser")
+        
+        # ПРОВЕРКА ДАТЫ: не старше 14 дней
+        try:
+            meta_date = soup.find("meta", property="article:published_time")
+            if meta_date and meta_date.get("content"):
+                date_str = meta_date["content"].split("T")[0]
+                pub_date = datetime.strptime(date_str, "%Y-%m-%d")
+                if (datetime.now() - pub_date).days > 14:
+                    return None, None, None  # Статья старее 2 недель, пропускаем
+        except:
+            pass  # Если дату не удалось определить, продолжаем проверку
+
         tekst = ""
         for sel in ["article", "[class*='article']", "[class*='content']", "div[itemprop='articleBody']"]:
             try:
@@ -128,11 +141,13 @@ def skachat_stranitsu(ssylka):
                         break
             except:
                 continue
+        
         if not tekst:
             for p in soup.find_all("p")[:30]:
                 t = p.get_text().strip()
                 if len(t) > 50:
                     tekst += t + "\n\n"
+                    
         kartinka = None
         og = soup.find("meta", property="og:image")
         if og and og.get("content"):
@@ -145,6 +160,7 @@ def skachat_stranitsu(ssylka):
                         src = urljoin(ssylka, src)
                     kartinka = src
                     break
+                    
         video_url = None
         ogv = soup.find("meta", property="og:video")
         if ogv and ogv.get("content") and ".mp4" in ogv["content"]:
@@ -155,6 +171,7 @@ def skachat_stranitsu(ssylka):
                 src = vt.get("src") or (vt.find("source").get("src") if vt.find("source") else None)
                 if src and ".mp4" in src:
                     video_url = src if src.startswith("http") else urljoin(ssylka, src)
+                    
         tekst = ochistit(tekst)
         if len(tekst) > 5000:
             tekst = tekst[:5000]
@@ -162,9 +179,9 @@ def skachat_stranitsu(ssylka):
             kartinka = urljoin(ssylka, kartinka)
         if video_url and not video_url.startswith("http"):
             video_url = urljoin(ssylka, video_url)
+            
         return tekst, kartinka, video_url
     except Exception as e:
-        log(f"  Ошибка страницы: {e}")
         return None, None, None
 
 
@@ -185,7 +202,6 @@ def skachat_fayl(url, tip="foto"):
 
 
 def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=None):
-    """Публикует ОДНО сообщение с медиа и подписью."""
     base = f"https://api.telegram.org/bot{token}/"
     
     caption = f"<b>{zag}</b>\n\n"
@@ -225,84 +241,98 @@ def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=No
     return False
 
 
-def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
-    """Перебирает ВСЕ источники рандомно, пока не найдёт подходящую новость."""
+def sobrat_novosti_kriminal(sources):
+    """Собирает пул новостей из RSS и HTML-разделов для глубокого поиска."""
+    vse_novosti = []
+    zag_headers = {"User-Agent": random.choice(USER_AGENTS)}
+    seen_links = set()
+    
+    for source in sources:
+        if source.endswith('.xml') or 'rss' in source.lower():
+            # Режим RSS
+            try:
+                r = requests.get(source, headers=zag_headers, timeout=15)
+                if r.status_code == 200:
+                    feed = feedparser.parse(r.text)
+                    for entry in feed.entries[:30]:
+                        zag = ochistit(entry.get("title", "").strip())
+                        link = entry.get("link", "").strip()
+                        if zag and len(zag) > 10 and link and link not in seen_links:
+                            seen_links.add(link)
+                            vse_novosti.append({"zagolovok": zag, "link": link})
+            except:
+                pass
+        else:
+            # Режим HTML-скрейпинга раздела (даёт доступ к архиву за недели)
+            try:
+                r = requests.get(source, headers=zag_headers, timeout=15)
+                if r.status_code == 200:
+                    soup = BeautifulSoup(r.text, "html.parser")
+                    for a in soup.find_all('a', href=True):
+                        href = a['href']
+                        title = a.get_text(strip=True)
+                        # Фильтр: длинный заголовок, полная ссылка, похоже на статью (много слэшей)
+                        if len(title) > 30 and href.startswith('http') and href.count('/') >= 4:
+                            if not any(x in href.lower() for x in ['/page/', '/tag/', '/author/', 'login', 'search', 'rubric']):
+                                title = re.sub(r'\s+', ' ', title)
+                                if href not in seen_links:
+                                    seen_links.add(href)
+                                    vse_novosti.append({"zagolovok": title, "link": href})
+            except:
+                pass
+                
+    random.shuffle(vse_novosti)
+    return vse_novosti[:150]  # Возвращаем до 150 уникальных ссылок для перебора
+
+
+def obrabotat_kanal(name, token, chat_id, sources_list, strict_kriminal):
     log(f"=== {name} ===")
     if not token:
         log(f"  Токен не задан, пропускаю.")
         return False
     
-    zag_headers = {"User-Agent": random.choice(USER_AGENTS)}
-    vse_novosti = []
+    log(f"  Сбор пула новостей (RSS + HTML разделы)...")
+    vse_novosti = sobrat_novosti_kriminal(sources_list) if strict_kriminal else []
     
-    # Перемешиваем RSS источники для рандомного порядка
-    shuffled_rss = rss_list.copy()
-    random.shuffle(shuffled_rss)
+    # Для мировых новостей оставляем старый простой RSS-сбор
+    if not strict_kriminal:
+        zag_headers = {"User-Agent": random.choice(USER_AGENTS)}
+        for url in sources_list:
+            try:
+                r = requests.get(url, headers=zag_headers, timeout=15)
+                if r.status_code == 200:
+                    feed = feedparser.parse(r.text)
+                    for entry in feed.entries[:30]:
+                        zag = ochistit(entry.get("title", "").strip())
+                        link = entry.get("link", "").strip()
+                        if zag and len(zag) > 10 and link and link not in [x['link'] for x in vse_novosti]:
+                            vse_novosti.append({"zagolovok": zag, "link": link})
+            except:
+                pass
+        random.shuffle(vse_novosti)
+
+    log(f"  Найдено {len(vse_novosti)} уникальных ссылок. Начинаю глубокий перебор...")
     
-    log(f"  Перебираю {len(shuffled_rss)} RSS источников в случайном порядке...")
-    
-    # Собираем все новости со всех источников
-    for rss_url in shuffled_rss:
-        try:
-            r = requests.get(rss_url, headers=zag_headers, timeout=15)
-            r.encoding = "utf-8"
-            if r.status_code != 200:
-                log(f"  RSS {rss_url[:30]}... — ошибка {r.status_code}")
-                continue
-            feed = feedparser.parse(r.text)
-            for entry in feed.entries[:20]:
-                zagolovok = ochistit(entry.get("title", "").strip())
-                ssylka = entry.get("link", "").strip()
-                opisanie = ochistit(entry.get("description", entry.get("summary", "")).strip())
-                if zagolovok and len(zagolovok) > 10 and ssylka:
-                    if zagolovok not in seen_titles:
-                        vse_novosti.append({
-                            "zagolovok": zagolovok,
-                            "ssylka": ssylka,
-                            "opisanie": opisanie,
-                            "rss": rss_url[:40]
-                        })
-        except Exception as e:
-            log(f"  Ошибка RSS {rss_url[:30]}...: {str(e)[:50]}")
-    
-    log(f"  Найдено {len(vse_novosti)} новостей со всех источников.")
-    if not vse_novosti:
-        log(f"  ⚠ Ни одной новости не найдено.")
-        return False
-    
-    # Перемешиваем новости для рандомного порядка проверки
-    random.shuffle(vse_novosti)
-    
-    log(f"  Начинаю перебор новостей в случайном порядке...")
-    
-    # Перебираем ВСЕ новости пока не найдём подходящую
     for i, novost in enumerate(vse_novosti, 1):
-        if i % 10 == 0:
-            log(f"  Проверено {i} из {len(vse_novosti)} новостей...")
+        if i % 20 == 0:
+            log(f"  Проверено {i} из {len(vse_novosti)}...")
+            
+        tekst, kart, video = skachat_stranitsu(novost["link"])
         
-        tekst, kart, video = skachat_stranitsu(novost["ssylka"])
-        
-        # Если не удалось скачать страницу — пробуем следующую
         if not tekst:
-            if novost.get("opisanie"):
-                tekst = novost["opisanie"]
-            else:
-                continue
-        
-        # Для криминала проверяем тематику
+            continue
+            
         if strict_kriminal and not is_kriminal(novost["zagolovok"], tekst):
             continue
-        
+            
         parts = [p.strip() for p in tekst.split("\n\n") if len(p.strip()) > 50]
         if len(parts) < 2:
             continue
-        
-        # МЕДИЯ ОБЯЗАТЕЛЬНА
+            
         if not kart and not video:
             continue
-        
-        # Нашли подходящую!
-        log(f"  ✓ Найдена подходящая новость: {novost['zagolovok'][:50]}...")
+            
+        log(f"  ✓ Подходящая новость найдена: {novost['zagolovok'][:50]}...")
         
         seen_titles.add(novost["zagolovok"])
         
@@ -314,13 +344,13 @@ def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
         if not put and kart:
             put = skachat_fayl(kart, "foto")
             tip = "foto"
-        
+            
         if put:
             ok = publikovat(
                 token, chat_id,
                 ochistit(novost["zagolovok"]),
                 [ochistit(x) for x in parts],
-                novost["ssylka"],
+                novost["link"],
                 foto_path=put if tip == "foto" else None,
                 video_path=put if tip == "video" else None,
             )
@@ -328,27 +358,25 @@ def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
                 log(f"  ✅ Опубликовано: {novost['zagolovok'][:60]}")
                 return True
             else:
-                log(f"  ✗ Ошибка публикации, пробую следующую...")
+                log(f"  ✗ Ошибка публикации, ищу следующую...")
                 continue
-    
-    log(f"  ⚠ Ни одна новость не подошла (нет медиа или не прошла фильтры).")
+                
+    log(f"  ⚠ Перебран весь пул, подходящих новостей с медиа не найдено.")
     return False
 
 
 if __name__ == "__main__":
     log("Запуск бота...")
     
-    # Рандомный интервал 50-59 минут (в среднем ~110 минут)
-    # Пропускаем 45% запусков
+    # Рандомный интервал: 45% шанс пропуска = среднее время между постами ~110 минут
     if random.random() < 0.45:
         log(" Случайный пропуск (интервал 50-110 минут).")
         sys.exit(0)
     
-    log("🚀 Начинаю поиск и публикацию...")
+    log("🚀 Начинаю глубокий поиск и публикацию...")
     
-    # Пробуем оба канала
     world_ok = obrabotat_kanal("Мировые", TG_BOT_TOKEN_WORLD, TG_CHAT_WORLD, RSS_WORLD, False)
-    krim_ok = obrabotat_kanal("Криминал", TG_BOT_TOKEN_KRIM, TG_CHAT_KRIM, RSS_KRIM, True)
+    krim_ok = obrabotat_kanal("Криминал", TG_BOT_TOKEN_KRIM, TG_CHAT_KRIM, SOURCES_KRIM, True)
     
     if world_ok or krim_ok:
         log("✅ Успешно опубликовано!")
