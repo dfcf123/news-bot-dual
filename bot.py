@@ -182,68 +182,49 @@ def skachat_fayl(url, tip="foto"):
         return None
 
 
-def otpravit_soobshenie(token, chat_id, text):
-    base = f"https://api.telegram.org/bot{token}/"
-    try:
-        r = requests.post(
-            base + "sendMessage",
-            data={"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
-            timeout=30,
-        )
-        return r.status_code == 200
-    except:
-        return False
-
-
 def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=None):
+    """Публикует ОДНО сообщение с медиа и подписью."""
     base = f"https://api.telegram.org/bot{token}/"
     
-    short_msg = f"<b>{zag}</b>\n\n{parts[0]}\n\n🔗 <a href='{ssylka}'>Читать полностью</a>"
-    if len(short_msg) > 1000:
-        short_msg = short_msg[:990] + "...</a>"
+    # Формируем подпись (до 1024 символов для медиа)
+    caption = f"<b>{zag}</b>\n\n"
+    for p in parts[:4]:
+        caption += f"{p}\n\n"
+    caption += f"🔗 <a href='{ssylka}'>Читать полностью</a>"
     
-    full_msg = f"<b>{zag}</b>\n\n"
-    for p in parts[:6]:
-        full_msg += f"{p}\n\n"
-    full_msg += f"🔗 <a href='{ssylka}'>Источник</a>"
-    if len(full_msg) > 4000:
-        full_msg = full_msg[:3990] + "...</a>"
+    if len(caption) > 1020:
+        caption = caption[:1010] + "...</a>"
     
-    media_ok = False
+    # Если есть видео — отправляем видео с подписью
     if video_path:
         try:
             with open(video_path, "rb") as f:
                 r = requests.post(
                     base + "sendVideo",
-                    data={"chat_id": chat_id, "caption": short_msg, "parse_mode": "HTML"},
+                    data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
                     files={"video": f},
                     timeout=60,
                 )
-            if r.status_code == 200:
-                media_ok = True
+            return r.status_code == 200
         except:
-            pass
+            return False
     
-    if not media_ok and foto_path:
+    # Если есть фото — отправляем фото с подписью
+    if foto_path:
         try:
             with open(foto_path, "rb") as f:
                 r = requests.post(
                     base + "sendPhoto",
-                    data={"chat_id": chat_id, "caption": short_msg, "parse_mode": "HTML"},
+                    data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
                     files={"photo": f},
                     timeout=30,
                 )
-            if r.status_code == 200:
-                media_ok = True
+            return r.status_code == 200
         except:
-            pass
+            return False
     
-    if not media_ok:
-        return otpravit_soobshenie(token, chat_id, full_msg)
-    
-    time.sleep(1)
-    otpravit_soobshenie(token, chat_id, full_msg)
-    return True
+    # Если нет медиа — НЕ публикуем
+    return False
 
 
 def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
@@ -289,6 +270,7 @@ def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
         parts = [p.strip() for p in tekst.split("\n\n") if len(p.strip()) > 50]
         if len(parts) < 2:
             continue
+        # МЕДИЯ ОБЯЗАТЕЛЬНА — пропускаем новости без фото/видео
         if not kart and not video:
             continue
         
@@ -325,8 +307,6 @@ def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
 if __name__ == "__main__":
     log("Запуск бота...")
     
-    # С вероятностью 40% пропускаем запуск — это даёт рандомный интервал 60-120 минут
-    # между публикациями без траты времени на sleep
     if random.random() < 0.3:
         log("Случайный пропуск запуска (рандомизация интервала).")
         sys.exit(0)
