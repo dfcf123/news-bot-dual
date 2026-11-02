@@ -16,13 +16,17 @@ TG_CHAT_KRIM = os.environ.get("TG_CHAT_KRIM", "@kriminal_vestnik")
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
 ]
 
+# Расширенные списки RSS
 RSS_WORLD = [
     "https://ria.ru/export/rss2/archive/index.xml",
     "https://tass.ru/rss/v2.xml",
     "https://lenta.ru/rss",
     "https://news.rbc.ru/rbc_news.rss",
+    "https://news.mail.ru/rss/",
+    "https://vz.ru/rss",
 ]
 
 RSS_KRIM = [
@@ -34,6 +38,10 @@ RSS_KRIM = [
     "https://www.kp.ru/daily/incidents/rss/",
     "https://www.mk.ru/incidents/rss.xml",
     "https://mvd.gov.by/rss/",
+    "https://newinform.com/rss",
+    "https://www.gazeta.ru/social/crime/rss.shtml",
+    "https://crimea.ria.ru/crime/rss/",
+    "https://www.vesti.ru/rss",
 ]
 
 ZAGOLOVOK_SLOVA = [
@@ -62,6 +70,9 @@ TEKST_SLOVA = ZAGOLOVOK_SLOVA + [
     "оперативник", "допрос", "экспертиза", "свидетель", "очевидец", "хищение",
     "растрата", "аферист", "афера", "рэкет",
 ]
+
+# Для защиты от дублей — храним заголовки в памяти (в рамках одного запуска)
+seen_titles = set()
 
 
 def log(msg):
@@ -118,7 +129,7 @@ def skachat_stranitsu(ssylka):
             except:
                 continue
         if not tekst:
-            for p in soup.find_all("p")[:20]:
+            for p in soup.find_all("p")[:30]:
                 t = p.get_text().strip()
                 if len(t) > 50:
                     tekst += t + "\n\n"
@@ -145,8 +156,8 @@ def skachat_stranitsu(ssylka):
                 if src and ".mp4" in src:
                     video_url = src if src.startswith("http") else urljoin(ssylka, src)
         tekst = ochistit(tekst)
-        if len(tekst) > 3500:
-            tekst = tekst[:3500]
+        if len(tekst) > 5000:
+            tekst = tekst[:5000]
         if kartinka and not kartinka.startswith("http"):
             kartinka = urljoin(ssylka, kartinka)
         if video_url and not video_url.startswith("http"):
@@ -173,33 +184,75 @@ def skachat_fayl(url, tip="foto"):
         return None
 
 
-def publikovat(token, chat_id, msg, foto_path=None, video_path=None):
+def otpravit_soobshenie(token, chat_id, text):
+    """Отправляет обычное текстовое сообщение (до 4096 символов)."""
     base = f"https://api.telegram.org/bot{token}/"
+    try:
+        r = requests.post(
+            base + "sendMessage",
+            data={"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+            timeout=30,
+        )
+        return r.status_code == 200
+    except:
+        return False
+
+
+def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=None):
+    """Публикует новость: медиа с краткой подписью + полный текст отдельным сообщением."""
+    base = f"https://api.telegram.org/bot{token}/"
+    
+    # Краткая подпись для медиа (до 1000 символов)
+    short_msg = f"<b>{zag}</b>\n\n{parts[0]}\n\n🔗 <a href='{ssylka}'>Читать полностью</a>"
+    if len(short_msg) > 1000:
+        short_msg = short_msg[:990] + "...</a>"
+    
+    # Полное сообщение с текстом (до 4000 символов)
+    full_msg = f"<b>{zag}</b>\n\n"
+    for p in parts[:6]:  # до 6 абзацев
+        full_msg += f"{p}\n\n"
+    full_msg += f"🔗 <a href='{ssylka}'>Источник</a>"
+    if len(full_msg) > 4000:
+        full_msg = full_msg[:3990] + "...</a>"
+    
+    # Сначала отправляем медиа с краткой подписью
+    media_ok = False
     if video_path:
         try:
             with open(video_path, "rb") as f:
                 r = requests.post(
                     base + "sendVideo",
-                    data={"chat_id": chat_id, "caption": msg, "parse_mode": "HTML"},
+                    data={"chat_id": chat_id, "caption": short_msg, "parse_mode": "HTML"},
                     files={"video": f},
                     timeout=60,
                 )
-            return r.status_code == 200
+            if r.status_code == 200:
+                media_ok = True
         except:
-            return False
-    if foto_path:
+            pass
+    
+    if not media_ok and foto_path:
         try:
             with open(foto_path, "rb") as f:
                 r = requests.post(
                     base + "sendPhoto",
-                    data={"chat_id": chat_id, "caption": msg, "parse_mode": "HTML"},
+                    data={"chat_id": chat_id, "caption": short_msg, "parse_mode": "HTML"},
                     files={"photo": f},
                     timeout=30,
                 )
-            return r.status_code == 200
+            if r.status_code == 200:
+                media_ok = True
         except:
-            return False
-    return False
+            pass
+    
+    # Если медиа не отправилось — отправляем хотя бы текст
+    if not media_ok:
+        return otpravit_soobshenie(token, chat_id, full_msg)
+    
+    # Если медиа ушло — отправляем полный текст следом
+    time.sleep(1)  # небольшая пауза между сообщениями
+    otpravit_soobshenie(token, chat_id, full_msg)
+    return True
 
 
 def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
@@ -222,7 +275,9 @@ def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
                 ssylka = entry.get("link", "").strip()
                 opisanie = ochistit(entry.get("description", entry.get("summary", "")).strip())
                 if zagolovok and len(zagolovok) > 10 and ssylka:
-                    vse.append({"zagolovok": zagolovok, "ssylka": ssylka, "opisanie": opisanie})
+                    # Проверка на дубликат по заголовку
+                    if zagolovok not in seen_titles:
+                        vse.append({"zagolovok": zagolovok, "ssylka": ssylka, "opisanie": opisanie})
         except Exception as e:
             log(f"  Ошибка RSS {url}: {e}")
     
@@ -247,12 +302,7 @@ def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
         if not kart and not video:
             continue
         
-        msg = f"<b>{ochistit(novost['zagolovok'])}</b>\n\n"
-        for p in [ochistit(x) for x in parts[:3]]:
-            msg += f"{p}\n\n"
-        msg += f"🔗 <a href='{novost['ssylka']}'>Читать полностью</a>"
-        if len(msg) > 1000:
-            msg = msg[:990] + "...</a>"
+        seen_titles.add(novost["zagolovok"])
         
         put = None
         tip = None
@@ -264,7 +314,14 @@ def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
             tip = "foto"
         
         if put:
-            ok = publikovat(token, chat_id, msg, foto_path=put if tip == "foto" else None, video_path=put if tip == "video" else None)
+            ok = publikovat(
+                token, chat_id,
+                ochistit(novost["zagolovok"]),
+                [ochistit(x) for x in parts],
+                novost["ssylka"],
+                foto_path=put if tip == "foto" else None,
+                video_path=put if tip == "video" else None,
+            )
             if ok:
                 log(f"  Опубликовано: {novost['zagolovok'][:60]}")
                 return True
@@ -277,6 +334,13 @@ def obrabotat_kanal(name, token, chat_id, rss_list, strict_kriminal):
 
 if __name__ == "__main__":
     log("Запуск бота...")
+    
+    # Случайная задержка 0-15 минут, чтобы публикации не были строго по часам
+    delay = random.randint(0, 15) * 60
+    if delay > 0:
+        log(f"Случайная задержка {delay // 60} мин перед началом...")
+        time.sleep(delay)
+    
     obrabotat_kanal("Мировые", TG_BOT_TOKEN_WORLD, TG_CHAT_WORLD, RSS_WORLD, False)
     obrabotat_kanal("Криминал", TG_BOT_TOKEN_KRIM, TG_CHAT_KRIM, RSS_KRIM, True)
     log("Готово.")
