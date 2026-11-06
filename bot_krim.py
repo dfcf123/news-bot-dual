@@ -4,11 +4,15 @@ import time
 import random
 import re
 import json
+import warnings
 import requests
 import feedparser
 from datetime import datetime
 from urllib.parse import urljoin
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+
+# Подавляем предупреждение о парсинге XML как HTML (оно не влияет на работу)
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 TG_BOT_TOKEN_KRIM = os.environ.get("TG_BOT_TOKEN_KRIM")
 TG_CHAT_KRIM = os.environ.get("TG_CHAT_KRIM", "@kriminal_vestnik")
@@ -57,12 +61,6 @@ ZAGOLOVOK_SLOVA = [
     "мафия", "картель", "самосуд", "линчевание", "экстрадиция",
 ]
 
-TEKST_SLOVA = ZAGOLOVOK_SLOVA + [
-    "преступление", "преступник", "правонарушение", "криминал", "криминальный",
-    "оперативник", "допрос", "экспертиза", "свидетель", "очевидец", "хищение",
-    "растрата", "аферист", "афера", "рэкет",
-]
-
 BLACKLIST_SLOVA = [
     "погода", "прогноз", "температура", "осадки", "ветер", "дождь", "снег",
     "спорт", "футбол", "хоккей", "баскетбол", "олимпиада", "чемпионат", "матч",
@@ -106,14 +104,21 @@ def ochistit(tekst):
 def is_kriminal(zag, tekst):
     z = zag.lower()
     t = tekst.lower()
+    
+    # 1. Проверка черного списка
     if any(s in z or s in t for s in BLACKLIST_SLOVA):
         return False
+    
+    # 2. Нужно хотя бы 1 криминальное слово в заголовке
     zag_krim = [s for s in ZAGOLOVOK_SLOVA if s in z]
     if len(zag_krim) < 1:
         return False
-    tekst_krim_specific = [s for s in ZAGOLOVOK_SLOVA if s in t and s not in ["полиция", "милиция", "суд", "судья", "прокуратура", "мвд"]]
-    if len(tekst_krim_specific) < 2:
+    
+    # 3. СМЯГЧЕНО: Нужно хотя бы 1 специфичное слово в тексте (было 2)
+    tekst_krim_specific = [s for s in ZAGOLOVOK_SLOVA if s in t and s not in ["полиция", "милиция", "суд", "судья", "прокуратура", "мвд", "следственный"]]
+    if len(tekst_krim_specific) < 1:
         return False
+    
     return True
 
 def skachat_stranitsu(ssylka):
@@ -200,16 +205,12 @@ def skachat_fayl(url, tip="foto"):
     try:
         r = requests.get(url, headers={"User-Agent": random.choice(USER_AGENTS)}, timeout=30)
         if r.status_code != 200:
-            log(f"  ⚠ Ошибка скачивания файла: статус {r.status_code}")
             return None
         
-        # ЗАЩИТА ОТ МУСОРА: реальные фото весят больше 10 КБ
         if len(r.content) < 10000:
-            log(f"  ⚠ Файл слишком маленький ({len(r.content)} байт), вероятно это заглушка или ошибка сайта.")
             return None
             
         if len(r.content) > 50 * 1024 * 1024:
-            log(f"  ⚠ Файл слишком большой ({len(r.content)} байт)")
             return None
             
         ext = ".mp4" if tip == "video" else (".png" if "png" in r.headers.get("content-type", "").lower() else ".jpg")
@@ -217,10 +218,8 @@ def skachat_fayl(url, tip="foto"):
         with open(put, "wb") as f:
             f.write(r.content)
         
-        log(f"  ✓ Файл успешно скачан: {put} ({len(r.content) // 1024} КБ)")
         return put
-    except Exception as e:
-        log(f"  ⚠ Исключение при скачивании файла: {e}")
+    except Exception:
         return None
 
 def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=None):
@@ -243,11 +242,8 @@ def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=No
                     files={"video": f},
                     timeout=60,
                 )
-                if r.status_code != 200:
-                    log(f"  ✗ Ошибка Telegram (Видео): {r.text}")
                 return r.status_code == 200
-        except Exception as e:
-            log(f"  ✗ Исключение при отправке видео: {e}")
+        except:
             return False
     
     if foto_path:
@@ -259,11 +255,8 @@ def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=No
                     files={"photo": f},
                     timeout=30,
                 )
-                if r.status_code != 200:
-                    log(f"  ✗ Ошибка Telegram (Фото): {r.text}")
                 return r.status_code == 200
-        except Exception as e:
-            log(f"  ✗ Исключение при отправке фото: {e}")
+        except:
             return False
     
     return False
@@ -329,16 +322,20 @@ def obrabotat_kanal():
             
         tekst, kart, video = skachat_stranitsu(novost["link"])
         if not tekst:
+            log(f"  [{i}] Пропуск: не удалось скачать текст страницы.")
             continue
             
         if not is_kriminal(novost["zagolovok"], tekst):
+            log(f"  [{i}] Пропуск: не подходит под криминальные фильтры.")
             continue
             
         parts = [p.strip() for p in tekst.split("\n\n") if len(p.strip()) > 50]
-        if len(parts) < 2:
+        if len(parts) < 1:  # СМЯГЧЕНО: был 2, стал 1
+            log(f"  [{i}] Пропуск: слишком мало текста (менее 1 абзаца).")
             continue
             
         if not kart and not video:
+            log(f"  [{i}] Пропуск: нет медиа (фото/видео).")
             continue
             
         log(f"  [{i}] ✓ ПОДХОДИТ: {novost['zagolovok'][:50]}...")
@@ -367,8 +364,10 @@ def obrabotat_kanal():
                 save_seen(seen_titles)
                 return True
             else:
-                log(f"  ✗ Не удалось опубликовать, ищу следующую...")
+                log(f"  ✗ Ошибка отправки в Telegram, ищу следующую...")
                 continue
+        else:
+            log(f"  [{i}] Пропуск: не удалось скачать файл медиа.")
                 
     log("  ⚠ Перебран весь пул, подходящих новостей с медиа не найдено.")
     return False
