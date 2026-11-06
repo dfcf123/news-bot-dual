@@ -11,7 +11,7 @@ from datetime import datetime
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
-# Подавляем предупреждение о парсинге XML как HTML (оно не влияет на работу)
+# Подавляем предупреждение о парсинге XML как HTML
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 TG_BOT_TOKEN_KRIM = os.environ.get("TG_BOT_TOKEN_KRIM")
@@ -23,6 +23,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
 
 SOURCES_KRIM = [
@@ -105,16 +106,13 @@ def is_kriminal(zag, tekst):
     z = zag.lower()
     t = tekst.lower()
     
-    # 1. Проверка черного списка
     if any(s in z or s in t for s in BLACKLIST_SLOVA):
         return False
     
-    # 2. Нужно хотя бы 1 криминальное слово в заголовке
     zag_krim = [s for s in ZAGOLOVOK_SLOVA if s in z]
     if len(zag_krim) < 1:
         return False
     
-    # 3. СМЯГЧЕНО: Нужно хотя бы 1 специфичное слово в тексте (было 2)
     tekst_krim_specific = [s for s in ZAGOLOVOK_SLOVA if s in t and s not in ["полиция", "милиция", "суд", "судья", "прокуратура", "мвд", "следственный"]]
     if len(tekst_krim_specific) < 1:
         return False
@@ -124,13 +122,14 @@ def is_kriminal(zag, tekst):
 def skachat_stranitsu(ssylka):
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ru-RU,ru;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+        "Referer": "https://yandex.ru/",
     }
     try:
         r = requests.get(ssylka, headers=headers, timeout=20)
         if r.status_code != 200:
-            return None, None, None
+            return None, None, None, r.status_code
         
         soup = BeautifulSoup(r.content, "html.parser")
         
@@ -140,7 +139,7 @@ def skachat_stranitsu(ssylka):
                 date_str = meta_date["content"].split("T")[0]
                 pub_date = datetime.strptime(date_str, "%Y-%m-%d")
                 if (datetime.now() - pub_date).days > 14:
-                    return None, None, None
+                    return None, None, None, 200
         except:
             pass
         
@@ -197,27 +196,23 @@ def skachat_stranitsu(ssylka):
         if video_url and not video_url.startswith("http"):
             video_url = urljoin(ssylka, video_url)
         
-        return tekst, kartinka, video_url
+        return tekst, kartinka, video_url, 200
     except Exception:
-        return None, None, None
+        return None, None, None, 0
 
 def skachat_fayl(url, tip="foto"):
     try:
         r = requests.get(url, headers={"User-Agent": random.choice(USER_AGENTS)}, timeout=30)
         if r.status_code != 200:
             return None
-        
         if len(r.content) < 10000:
             return None
-            
         if len(r.content) > 50 * 1024 * 1024:
             return None
-            
         ext = ".mp4" if tip == "video" else (".png" if "png" in r.headers.get("content-type", "").lower() else ".jpg")
         put = f"/tmp/news_{tip}{ext}"
         with open(put, "wb") as f:
             f.write(r.content)
-        
         return put
     except Exception:
         return None
@@ -320,18 +315,21 @@ def obrabotat_kanal():
         if novost["zagolovok"] in seen_titles:
             continue
             
-        tekst, kart, video = skachat_stranitsu(novost["link"])
+        # Теперь получаем 4 значения, включая статус ответа
+        tekst, kart, video, status = skachat_stranitsu(novost["link"])
+        
         if not tekst:
-            log(f"  [{i}] Пропуск: не удалось скачать текст страницы.")
+            log(f"  [{i}] Пропуск: сайт вернул статус {status} (блокировка или ошибка).")
             continue
             
         if not is_kriminal(novost["zagolovok"], tekst):
-            log(f"  [{i}] Пропуск: не подходит под криминальные фильтры.")
+            # ВАЖНО: теперь мы видим, КАКОЙ ИМЕННО заголовок отбракован
+            log(f"  [{i}] Пропуск (фильтры): {novost['zagolovok'][:60]}")
             continue
             
         parts = [p.strip() for p in tekst.split("\n\n") if len(p.strip()) > 50]
-        if len(parts) < 1:  # СМЯГЧЕНО: был 2, стал 1
-            log(f"  [{i}] Пропуск: слишком мало текста (менее 1 абзаца).")
+        if len(parts) < 1:
+            log(f"  [{i}] Пропуск: слишком мало текста.")
             continue
             
         if not kart and not video:
