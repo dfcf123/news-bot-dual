@@ -17,29 +17,33 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
 ]
 
-# ИСТОЧНИКИ КРИМИНАЛЬНЫХ НОВОСТЕЙ
+# ИСТОЧНИКИ: РБ + РФ + МИР (НА РУССКОМ)
 RSS_KRIM = [
-    "https://www.mk.ru/incidents/rss.xml",
-    "https://newinform.com/rss",
-    "https://rg.ru/rss/rubric/criminal/",
-    "https://russian.rt.com/rss",
-    "https://www.vesti.ru/rss",
-    "https://www.mzk2.ru/feed",
-    "https://noctu.ru/feed",
-    "https://www.mk.ru/incidents/",
-    "https://newinform.com/category/proisshestviya/",
-    "https://rg.ru/rubric/criminal/",
-    "https://www.kp.ru/daily/incidents/",
-    "https://www.vesti.ru/incidents"
+    # --- БЕЛАРУСЬ ---
+    "https://24minsk.by/tag/pistolet/feed",          # Минск 24: происшествия, криминал, оружие 
+    "https://www.gs.by/rss",                         # GS.BY: много криминала и судов в РБ [citation:13]
+    "https://news.mail.ru/society/",                 # Mail.ru: свежие криминальные сводки РБ [citation:1][citation:6]
+    "https://www.belarus.kp.ru/online/",             # КП-Беларусь: криминал и происшествия [citation:11]
+    
+    # --- РОССИЯ ---
+    "https://rg.ru/rss/rubric/criminal/",            # Российская газета: криминал [citation:2]
+    "https://www.mk.ru/incidents/rss.xml",           # МК: происшествия
+    "https://spbnews78.ru/rss",                      # СПб новости: криминал [citation:7]
+    "https://russiatoday.ru/rss",                    # Russia Today: криминал и суды [citation:12]
+    
+    # --- МИР (крупные агентства, которые пишут про мир) ---
+    "https://tass.ru/rss/v2.xml",                    # ТАСС: мировые криминальные новости
+    "https://vz.ru/rss",                             # Взгляд: мировые новости
 ]
 
 # КРИМИНАЛЬНЫЕ СЛОВА
 ZAGOLOVOK_SLOVA = [
     "убийств", "убил", "убила", "убийца", "труп", "задержан", "задержана", "задержали",
     "арестован", "арестована", "осужден", "осуждена", "приговорен", "приговорили",
+    "приговор", "осудили", "срок", "колонии", "пожизненное",
     "кража", "украл", "украла", "ограбление", "ограбил", "обокрали", "мошенник",
     "мошенница", "мошенничество", "мошенники", "наркотик", "наркотики", "закладка",
-    "наркоман", "разбой", "нападение", "напал", "напала", "избил", "избиение",
+    "наркоман", "наркокартель", "разбой", "нападение", "напал", "напала", "избил", "избиение",
     "погиб", "погибла", "погибли", "погибший", "ранен", "ранена", "ранены", "ранение",
     "дтп", "авария", "сбил", "поджог", "поджег", "подожгла", "взрыв", "взорвал",
     "взорвалась", "изнасилован", "изнасилование", "домогательство", "похищен",
@@ -50,9 +54,10 @@ ZAGOLOVOK_SLOVA = [
     "застрелился", "удушил", "задушил", "найден труп", "обнаружен труп",
     "обнаружено тело", "расчленен", "изувечен", "пропал без вести", "разыскивается",
     "ск ", "следователь", "возбуждено дело", "уголовное дело", "полиция", "милиция",
-    "мвд", "омон", "росгвардия", "спецназ", "суд", "судья", "приговор", "прокуратура",
+    "мвд", "омон", "росгвардия", "спецназ", "суд", "судья", "прокуратура",
     "жертва", "потерпевший", "потерпевшая", "педофил", "педофилия", "штурм", "обыск",
     "выемка", "огнестрельн", "ножевое ранение", "скрылся с места", "сбил и скрылся",
+    "мафия", "картель", "самосуд", "линчевание", "экстрадиция",
 ]
 
 TEKST_SLOVA = ZAGOLOVOK_SLOVA + [
@@ -99,12 +104,10 @@ def is_kriminal(zag, tekst):
     if any(s in z or s in t for s in BLACKLIST_SLOVA):
         return False
     
-    # Ослаблено: достаточно 1 криминального слова в заголовке
     zag_krim = [s for s in ZAGOLOVOK_SLOVA if s in z]
     if len(zag_krim) < 1:
         return False
     
-    # Ослаблено: достаточно 2 специфичных слов в тексте
     tekst_krim_specific = [s for s in ZAGOLOVOK_SLOVA if s in t and s not in ["полиция", "милиция", "суд", "судья", "прокуратура", "мвд"]]
     if len(tekst_krim_specific) < 2:
         return False
@@ -292,7 +295,7 @@ def sobrat_novosti_kriminal(sources):
 
 
 def obrabotat_kanal():
-    log("=== Криминальный вестник ===")
+    log("=== Криминальный вестник (РБ + РФ + Мир) ===")
     if not TG_BOT_TOKEN_KRIM:
         log("  Токен не задан!")
         return False
@@ -309,19 +312,15 @@ def obrabotat_kanal():
         tekst, kart, video = skachat_stranitsu(novost["link"])
         
         if not tekst:
-            log(f"  [{i}] ✗ Нет текста: {novost['zagolovok'][:40]}...")
             continue
             
         if not is_kriminal(novost["zagolovok"], tekst):
-            log(f"  [{i}] ✗ Не криминал: {novost['zagolovok'][:40]}...")
             continue
             
         parts = [p.strip() for p in tekst.split("\n\n") if len(p.strip()) > 50]
         if len(parts) < 2:
-            log(f"  [{i}] ✗ Мало абзацев ({len(parts)}): {novost['zagolovok'][:40]}...")
             continue
             
-        # Если нет медиа, пробуем отправить как текст
         if not kart and not video:
             log(f"  [{i}] ⚠ Нет медиа, отправляю как текст: {novost['zagolovok'][:40]}...")
             
@@ -342,10 +341,8 @@ def obrabotat_kanal():
                 if r.status_code == 200:
                     log(f"  ✅ Опубликовано (текст): {novost['zagolovok'][:60]}")
                     return True
-                else:
-                    log(f"  ✗ Ошибка отправки текста: {r.text[:100]}")
-            except Exception as e:
-                log(f"  ✗ Ошибка: {e}")
+            except:
+                pass
             continue
             
         log(f"  [{i}] ✓ ПОДХОДИТ: {novost['zagolovok'][:50]}...")
@@ -381,7 +378,7 @@ def obrabotat_kanal():
 
 if __name__ == "__main__":
     log("Запуск бота...")
-    log("🚀 Начинаю глубокий поиск и публикацию...")
+    log("🚀 Начинаю поиск криминальных новостей (РБ + РФ + Мир)...")
     
     if obrabotat_kanal():
         log("✅ Успешно опубликовано!")
