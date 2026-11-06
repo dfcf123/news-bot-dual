@@ -29,7 +29,6 @@ RSS_WORLD = [
     "https://vz.ru/rss",
 ]
 
-# Для криминала: RSS + прямые HTML-разделы для глубокого поиска (до 2-3 недель назад)
 SOURCES_KRIM = [
     "https://www.mk.ru/incidents/rss.xml",
     "https://newinform.com/rss",
@@ -38,7 +37,6 @@ SOURCES_KRIM = [
     "https://www.vesti.ru/rss",
     "https://www.mzk2.ru/feed",
     "https://noctu.ru/feed",
-    # HTML-разделы для глубокого парсинга
     "https://www.mk.ru/incidents/",
     "https://newinform.com/category/proisshestviya/",
     "https://rg.ru/rubric/criminal/",
@@ -73,6 +71,18 @@ TEKST_SLOVA = ZAGOLOVOK_SLOVA + [
     "растрата", "аферист", "афера", "рэкет",
 ]
 
+BLACKLIST_SLOVA = [
+    "погода", "прогноз", "температура", "осадки", "ветер", "дождь", "снег",
+    "спорт", "футбол", "хоккей", "баскетбол", "олимпиада", "чемпионат", "матч",
+    "культура", "выставка", "концерт", "спектакль", "фильм", "кино", "премьера",
+    "экономика", "курс валют", "инфляция", "ввп", "бюджет", "налоги", "пенсия",
+    "политика", "выборы", "парламент", "президент", "министр", "закон", "реформа",
+    "наука", "открытие", "исследование", "учёные", "экспедиция", "космос",
+    "здоровье", "медицина", "болезнь", "вирус", "вакцина", "лекарство",
+    "образование", "школа", "университет", "студенты", "экзамен",
+    "туризм", "отпуск", "путешествие", "отель", "авиабилеты",
+]
+
 seen_titles = set()
 
 
@@ -93,12 +103,22 @@ def ochistit(tekst):
 
 
 def is_kriminal(zag, tekst):
+    """Ужесточённая проверка на криминальную тематику."""
     z = zag.lower()
     t = tekst.lower()
-    if not any(s in z for s in ZAGOLOVOK_SLOVA):
+    
+    if any(s in z or s in t for s in BLACKLIST_SLOVA):
         return False
-    n = [s for s in TEKST_SLOVA if s in t]
-    return len(n) >= 2
+    
+    zag_krim = [s for s in ZAGOLOVOK_SLOVA if s in z]
+    if len(zag_krim) < 2:
+        return False
+    
+    tekst_krim_specific = [s for s in ZAGOLOVOK_SLOVA if s in t and s not in ["полиция", "милиция", "суд", "судья", "прокуратура", "мвд"]]
+    if len(tekst_krim_specific) < 3:
+        return False
+    
+    return True
 
 
 def skachat_stranitsu(ssylka):
@@ -116,17 +136,16 @@ def skachat_stranitsu(ssylka):
         
         soup = BeautifulSoup(r.text, "html.parser")
         
-        # ПРОВЕРКА ДАТЫ: не старше 14 дней
         try:
             meta_date = soup.find("meta", property="article:published_time")
             if meta_date and meta_date.get("content"):
                 date_str = meta_date["content"].split("T")[0]
                 pub_date = datetime.strptime(date_str, "%Y-%m-%d")
                 if (datetime.now() - pub_date).days > 14:
-                    return None, None, None  # Статья старее 2 недель, пропускаем
+                    return None, None, None
         except:
-            pass  # Если дату не удалось определить, продолжаем проверку
-
+            pass
+        
         tekst = ""
         for sel in ["article", "[class*='article']", "[class*='content']", "div[itemprop='articleBody']"]:
             try:
@@ -147,7 +166,7 @@ def skachat_stranitsu(ssylka):
                 t = p.get_text().strip()
                 if len(t) > 50:
                     tekst += t + "\n\n"
-                    
+        
         kartinka = None
         og = soup.find("meta", property="og:image")
         if og and og.get("content"):
@@ -160,7 +179,7 @@ def skachat_stranitsu(ssylka):
                         src = urljoin(ssylka, src)
                     kartinka = src
                     break
-                    
+        
         video_url = None
         ogv = soup.find("meta", property="og:video")
         if ogv and ogv.get("content") and ".mp4" in ogv["content"]:
@@ -171,7 +190,7 @@ def skachat_stranitsu(ssylka):
                 src = vt.get("src") or (vt.find("source").get("src") if vt.find("source") else None)
                 if src and ".mp4" in src:
                     video_url = src if src.startswith("http") else urljoin(ssylka, src)
-                    
+        
         tekst = ochistit(tekst)
         if len(tekst) > 5000:
             tekst = tekst[:5000]
@@ -179,7 +198,7 @@ def skachat_stranitsu(ssylka):
             kartinka = urljoin(ssylka, kartinka)
         if video_url and not video_url.startswith("http"):
             video_url = urljoin(ssylka, video_url)
-            
+        
         return tekst, kartinka, video_url
     except Exception as e:
         return None, None, None
@@ -207,7 +226,7 @@ def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=No
     caption = f"<b>{zag}</b>\n\n"
     for p in parts[:4]:
         caption += f"{p}\n\n"
-    caption += f" <a href='{ssylka}'>Читать полностью</a>"
+    caption += f"🔗 <a href='{ssylka}'>Читать полностью</a>"
     
     if len(caption) > 1020:
         caption = caption[:1010] + "...</a>"
@@ -242,14 +261,12 @@ def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=No
 
 
 def sobrat_novosti_kriminal(sources):
-    """Собирает пул новостей из RSS и HTML-разделов для глубокого поиска."""
     vse_novosti = []
     zag_headers = {"User-Agent": random.choice(USER_AGENTS)}
     seen_links = set()
     
     for source in sources:
         if source.endswith('.xml') or 'rss' in source.lower():
-            # Режим RSS
             try:
                 r = requests.get(source, headers=zag_headers, timeout=15)
                 if r.status_code == 200:
@@ -263,7 +280,6 @@ def sobrat_novosti_kriminal(sources):
             except:
                 pass
         else:
-            # Режим HTML-скрейпинга раздела (даёт доступ к архиву за недели)
             try:
                 r = requests.get(source, headers=zag_headers, timeout=15)
                 if r.status_code == 200:
@@ -271,7 +287,6 @@ def sobrat_novosti_kriminal(sources):
                     for a in soup.find_all('a', href=True):
                         href = a['href']
                         title = a.get_text(strip=True)
-                        # Фильтр: длинный заголовок, полная ссылка, похоже на статью (много слэшей)
                         if len(title) > 30 and href.startswith('http') and href.count('/') >= 4:
                             if not any(x in href.lower() for x in ['/page/', '/tag/', '/author/', 'login', 'search', 'rubric']):
                                 title = re.sub(r'\s+', ' ', title)
@@ -280,9 +295,9 @@ def sobrat_novosti_kriminal(sources):
                                     vse_novosti.append({"zagolovok": title, "link": href})
             except:
                 pass
-                
+    
     random.shuffle(vse_novosti)
-    return vse_novosti[:150]  # Возвращаем до 150 уникальных ссылок для перебора
+    return vse_novosti[:150]
 
 
 def obrabotat_kanal(name, token, chat_id, sources_list, strict_kriminal):
@@ -294,7 +309,6 @@ def obrabotat_kanal(name, token, chat_id, sources_list, strict_kriminal):
     log(f"  Сбор пула новостей (RSS + HTML разделы)...")
     vse_novosti = sobrat_novosti_kriminal(sources_list) if strict_kriminal else []
     
-    # Для мировых новостей оставляем старый простой RSS-сбор
     if not strict_kriminal:
         zag_headers = {"User-Agent": random.choice(USER_AGENTS)}
         for url in sources_list:
@@ -368,9 +382,8 @@ def obrabotat_kanal(name, token, chat_id, sources_list, strict_kriminal):
 if __name__ == "__main__":
     log("Запуск бота...")
     
-    # Рандомный интервал: 45% шанс пропуска = среднее время между постами ~110 минут
     if False:  # Отключено: random.random() < 0.2:
-        log(" Случайный пропуск (интервал 50-110 минут).")
+        log(" Случайный пропуск.")
         sys.exit(0)
     
     log("🚀 Начинаю глубокий поиск и публикацию...")
