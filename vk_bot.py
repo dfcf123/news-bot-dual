@@ -10,15 +10,15 @@ import vk_api
 import subprocess
 import json
 
-# Проверяем Pillow
+# Проверяем доступность библиотеки Pillow для создания карточек
 try:
     from PIL import Image, ImageDraw, ImageFont
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
 
-VK_ACCESS_TOKEN = os.environ.get("VK_ACCESS_TOKEN", "vk1.a.ng2wvH2rNqkxkYvfj7Rslo3EWS9dwsW4HpxgJb02_oQisICqFpC5pljEDPfZgy2jgLaYzsBtdassbdGHeANk6dSnzLPisjetf671WIKmJDRfmMQ2Sz8avFWGQvsSWHDFAxxKFUUSlaSk1Pw1ChYGRrTp0z8x6zk_DfaAasYNaOsmyrPJnfKENItk0B1xz1LPVG9dfySF11RLAmAjsW-qCg
-")
+# Читаем настройки из переменных окружения GitHub (НЕ МЕНЯЙ ЭТИ СТРОКИ!)
+VK_ACCESS_TOKEN = os.environ.get("VK_ACCESS_TOKEN", "")
 VK_GROUP_ID = os.environ.get("VK_GROUP_ID", "-183445484")
 
 NEWS_SOURCES = [
@@ -30,22 +30,24 @@ NEWS_SOURCES = [
 ]
 
 ANDROID_KEYWORDS = ["android", "андроид", "google pixel", "samsung", "xiaomi", "oneplus", "redmi", "poco", "realme", "смартфон", "galaxy", "pixel"]
-IPHONE_KEYWORDS = ["iphone", "ipad", "ios", "apple", "macbook", "airpods", "macos", "айфон", "айпад", "эппл"]
+IPHONE_KEYWORDS = ["iphone", "ipad", "ios", "apple", "macbook", "airpods", "macos", "айфон", "айпад", "эппл", "apple watch", "imac"]
 
 MAX_POSTS_PER_RUN = 1
 SEEN_FILE = "vk_seen_links.txt"
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
 }
 
-AD_MARKERS = ["подпишись", "реклама", "акция", "скидка", "промокод", "купи", "закажи"]
+AD_MARKERS = ["подпишись", "реклама", "акция", "скидка", "промокод", "купи", "закажи", "сундук али", "ali-баб", "партнерский материал"]
 
 GRADIENTS = [
     ((66, 134, 244), (119, 94, 200)),
     ((233, 69, 96), (225, 48, 108)),
     ((0, 188, 212), (0, 150, 136)),
+    ((255, 152, 0), (255, 87, 34)),
 ]
 
 def log(msg):
@@ -56,7 +58,7 @@ def load_seen_links():
         try:
             with open(SEEN_FILE, 'r', encoding='utf-8') as f:
                 return set(line.strip() for line in f if line.strip())
-        except:
+        except Exception:
             return set()
     return set()
 
@@ -74,7 +76,7 @@ def commit_seen_file():
             subprocess.run(['git', 'add', SEEN_FILE], check=False, capture_output=True)
             subprocess.run(['git', 'commit', '-m', 'Update seen links'], check=False, capture_output=True)
             subprocess.run(['git', 'push'], check=False, capture_output=True)
-            log("✓ Файл сохранён")
+            log("✓ Файл истории сохранён в репозиторий")
     except Exception as e:
         log(f"Ошибка коммита: {e}")
 
@@ -99,9 +101,8 @@ def clean_text(text):
     return '\n'.join(clean_lines)
 
 def create_card(title, is_iphone=False):
-    """Создает карточку с градиентом"""
     if not PIL_AVAILABLE:
-        log("Pillow не доступен")
+        log("Pillow не доступен, карточка не будет создана")
         return None
     
     try:
@@ -111,36 +112,33 @@ def create_card(title, is_iphone=False):
         img = Image.new('RGB', (width, height), gradient[0])
         draw = ImageDraw.Draw(img)
         
-        # Градиент
         for y in range(height):
             r = int(gradient[0][0] + (gradient[1][0] - gradient[0][0]) * y / height)
             g = int(gradient[0][1] + (gradient[1][1] - gradient[0][1]) * y / height)
             b = int(gradient[0][2] + (gradient[1][2] - gradient[0][2]) * y / height)
             draw.line([(0, y), (width, y)], fill=(r, g, b))
         
-        # Эмодзи
         emoji = "🍎" if is_iphone else "🤖"
         try:
             font_emoji = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 150)
-        except:
+        except Exception:
             font_emoji = ImageFont.load_default()
         
         draw.text((width//2 - 75, height//2 - 150), emoji, fill=(255, 255, 255), font=font_emoji)
         
-        # Заголовок
         if len(title) > 80:
             title = title[:77] + "..."
         
         try:
             font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 36)
-        except:
+        except Exception:
             font_text = ImageFont.load_default()
         
         draw.text((50, height - 80), title, fill=(255, 255, 255), font=font_text)
         
         temp_file = f"/tmp/vk_card_{int(time.time())}.png"
         img.save(temp_file, 'PNG')
-        log(f"Карточка создана")
+        log("Карточка успешно создана")
         return temp_file
         
     except Exception as e:
@@ -155,7 +153,6 @@ def get_article_content(url):
         
         soup = BeautifulSoup(r.content, 'html.parser')
         
-        # Ищем картинку
         image_url = None
         og = soup.find('meta', property='og:image')
         if og and og.get('content'):
@@ -168,7 +165,6 @@ def get_article_content(url):
                 if img:
                     image_url = img.get('src')
         
-        # Текст
         text = ""
         content = soup.find('article')
         if content:
@@ -187,7 +183,7 @@ def get_article_content(url):
 def fetch_news():
     news_list = []
     seen_links = load_seen_links()
-    log(f"Загружено {len(seen_links)} ссылок")
+    log(f"Загружено {len(seen_links)} ссылок из истории")
     
     for source in NEWS_SOURCES:
         try:
@@ -212,7 +208,7 @@ def fetch_news():
         except Exception as e:
             log(f"Ошибка RSS {source}: {e}")
     
-    log(f"Найдено {len(news_list)} ссылок")
+    log(f"Найдено {len(news_list)} релевантных ссылок")
     
     result = []
     for item in news_list[:10]:
@@ -232,7 +228,7 @@ def fetch_news():
         if len(result) >= 3:
             break
     
-    log(f"Готово: {len(result)} статей")
+    log(f"Готово к публикации: {len(result)} статей")
     return result
 
 def download_image(url):
@@ -252,45 +248,38 @@ def download_image(url):
         return None
 
 def upload_photo_to_vk(vk, group_id, temp_file):
-    """Загружает фото на стену группы по документации ВК"""
     try:
         log(f"Загружаю фото в ВК...")
         
-        # Шаг 1: Получаем URL для загрузки
         upload_server = vk.photos.getWallUploadServer(group_id=group_id)
         upload_url = upload_server['upload_url']
-        log(f"URL получен")
         
-        # Шаг 2: Загружаем файл
         with open(temp_file, 'rb') as f:
             response = requests.post(upload_url, files={'photo': f})
         
-        upload_data = response.json()
-        log(f"Ответ сервера: {list(upload_data.keys())}")
-        
-        if 'photo' not in upload_data or 'server' not in upload_data or 'hash' not in upload_data:
-            log(f"Ошибка: {upload_data}")
+        data = response.json()
+        if 'photo' not in data or 'server' not in data or 'hash' not in data:
+            log(f"Ошибка ответа сервера ВК: {data}")
             return None
         
-        # Шаг 3: Сохраняем фото
         log(f"Сохраняю фото...")
         saved = vk.photos.saveWallPhoto(
             group_id=group_id,
-            photo=upload_data['photo'],
-            server=upload_data['server'],
-            hash=upload_data['hash']
+            photo=data['photo'],
+            server=data['server'],
+            hash=data['hash']
         )
         
         if saved and len(saved) > 0:
             photo_id = f"photo{saved[0]['owner_id']}_{saved[0]['id']}"
-            log(f"Фото сохранено: {photo_id}")
+            log(f"Фото успешно сохранено: {photo_id}")
             return photo_id
         else:
-            log(f"Ошибка сохранения: {saved}")
+            log(f"Ошибка сохранения фото: {saved}")
             return None
             
     except vk_api.exceptions.ApiError as e:
-        log(f"API ошибка: {e}")
+        log(f"API ошибка ВК: {e}")
         return None
     except Exception as e:
         log(f"Ошибка загрузки: {e}")
@@ -305,13 +294,11 @@ def post_to_vk(news_item):
         is_iphone = any(k in news_item['title'].lower() for k in IPHONE_KEYWORDS)
         emoji = "🍎" if is_iphone else "🤖"
         
-        # Формируем текст
         post_text = f"{emoji} {news_item['title']}\n\n{news_item['text']}\n\nИсточник: {news_item['link']}\n\n#Android #iPhone #Технологии"
         
         attachment = None
         temp_file = None
         
-        # Пробуем загрузить фото со статьи
         if news_item.get('image'):
             log(f"Нашёл фото в статье")
             temp_file = download_image(news_item['image'])
@@ -320,25 +307,23 @@ def post_to_vk(news_item):
                 attachment = upload_photo_to_vk(vk, group_id, temp_file)
                 try:
                     os.remove(temp_file)
-                except:
+                except Exception:
                     pass
                 
                 if not attachment:
                     log(f"Фото не загрузилось, создаю карточку")
         
-        # Если фото нет — создаем карточку
         if not attachment:
-            log(f"Создаю карточку...")
+            log(f"Создаю текстовую карточку...")
             temp_file = create_card(news_item['title'], is_iphone)
             
             if temp_file:
                 attachment = upload_photo_to_vk(vk, group_id, temp_file)
                 try:
                     os.remove(temp_file)
-                except:
+                except Exception:
                     pass
         
-        # Публикуем пост
         log(f"Публикую пост...")
         vk.wall.post(
             owner_id=int(VK_GROUP_ID),
@@ -351,36 +336,36 @@ def post_to_vk(news_item):
         return True
         
     except Exception as e:
-        log(f"❌ Ошибка: {e}")
+        log(f"❌ Ошибка публикации: {e}")
         return False
 
 def main():
     log("=" * 60)
-    log("VK News Bot")
+    log("VK News Bot запущен")
     log("=" * 60)
     
     if not PIL_AVAILABLE:
-        log("⚠️ Pillow не установлен")
+        log("⚠️ Библиотека Pillow не найдена. Карточки создаваться не будут.")
     
     if not VK_ACCESS_TOKEN or not VK_GROUP_ID.startswith('-'):
-        log("❌ Ошибка настроек!")
+        log("❌ Ошибка: Токен или ID группы не заданы в Secrets GitHub!")
         return
     
     try:
         vk_api.VkApi(token=VK_ACCESS_TOKEN).get_api()
-        log("✅ Авторизация успешна")
+        log("✅ Авторизация в ВК успешна")
     except Exception as e:
         log(f"❌ Ошибка авторизации: {e}")
         return
     
     news_list = fetch_news()
     if not news_list:
-        log("❌ Нет новостей")
+        log("❌ Нет новых подходящих новостей для публикации")
         return
     
     seen_links = load_seen_links()
     for news in news_list[:MAX_POSTS_PER_RUN]:
-        log(f"\n[1/{MAX_POSTS_PER_RUN}] Публикую...")
+        log(f"\n[1/{MAX_POSTS_PER_RUN}] Начинаю публикацию...")
         if post_to_vk(news):
             seen_links.add(news['link'])
             save_seen_links(seen_links)
@@ -388,7 +373,8 @@ def main():
             break
     
     log(f"\n{'=' * 60}")
-    log("✅ Готово!")
+    log("✅ Работа бота завершена успешно!")
+    log(f"{'=' * 60}")
 
 if __name__ == "__main__":
     main()
