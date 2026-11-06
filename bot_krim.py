@@ -218,11 +218,14 @@ def skachat_fayl(url, tip="foto"):
         return None
 
 def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=None):
-    # Очищаем от возможных пробелов и переносов строк
     token = token.strip()
     chat_id = chat_id.strip()
     
-    log(f"  🔍 Отладка: Chat ID = '{chat_id}', Длина токена = {len(token)}")
+    # Безопасная отладка: показываем только начало и конец токена
+    if len(token) > 10:
+        log(f"  🔍 Отладка: Chat ID = '{chat_id}', Токен = {token[:5]}...{token[-5:]} (длина: {len(token)})")
+    else:
+        log(f"  🔍 Отладка: Chat ID = '{chat_id}', Токен слишком короткий! (длина: {len(token)})")
     
     base = f"https://api.telegram.org/bot{token}/"
     
