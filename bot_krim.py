@@ -33,7 +33,7 @@ RSS_KRIM = [
     "https://www.vesti.ru/incidents"
 ]
 
-# ЖЁСТКИЕ КРИМИНАЛЬНЫЕ СЛОВА
+# КРИМИНАЛЬНЫЕ СЛОВА
 ZAGOLOVOK_SLOVA = [
     "убийств", "убил", "убила", "убийца", "труп", "задержан", "задержана", "задержали",
     "арестован", "арестована", "осужден", "осуждена", "приговорен", "приговорили",
@@ -99,12 +99,14 @@ def is_kriminal(zag, tekst):
     if any(s in z or s in t for s in BLACKLIST_SLOVA):
         return False
     
+    # Ослаблено: достаточно 1 криминального слова в заголовке
     zag_krim = [s for s in ZAGOLOVOK_SLOVA if s in z]
-    if len(zag_krim) < 2:
+    if len(zag_krim) < 1:
         return False
     
+    # Ослаблено: достаточно 2 специфичных слов в тексте
     tekst_krim_specific = [s for s in ZAGOLOVOK_SLOVA if s in t and s not in ["полиция", "милиция", "суд", "судья", "прокуратура", "мвд"]]
-    if len(tekst_krim_specific) < 3:
+    if len(tekst_krim_specific) < 2:
         return False
     
     return True
@@ -298,30 +300,55 @@ def obrabotat_kanal():
     log(f"  Сбор пула новостей...")
     vse_novosti = sobrat_novosti_kriminal(RSS_KRIM)
 
-    log(f"  Найдено {len(vse_novosti)} уникальных ссылок. Начинаю глубокий перебор...")
+    log(f"  Найдено {len(vse_novosti)} уникальных ссылок. Начинаю перебор...")
     
     for i, novost in enumerate(vse_novosti, 1):
-        if i % 20 == 0:
+        if i % 10 == 0:
             log(f"  Проверено {i} из {len(vse_novosti)}...")
             
         tekst, kart, video = skachat_stranitsu(novost["link"])
         
         if not tekst:
+            log(f"  [{i}] ✗ Нет текста: {novost['zagolovok'][:40]}...")
             continue
             
         if not is_kriminal(novost["zagolovok"], tekst):
+            log(f"  [{i}] ✗ Не криминал: {novost['zagolovok'][:40]}...")
             continue
             
         parts = [p.strip() for p in tekst.split("\n\n") if len(p.strip()) > 50]
         if len(parts) < 2:
+            log(f"  [{i}] ✗ Мало абзацев ({len(parts)}): {novost['zagolovok'][:40]}...")
             continue
             
+        # Если нет медиа, пробуем отправить как текст
         if not kart and not video:
+            log(f"  [{i}] ⚠ Нет медиа, отправляю как текст: {novost['zagolovok'][:40]}...")
+            
+            caption = f"<b>{ochistit(novost['zagolovok'])}</b>\n\n"
+            for p in [ochistit(x) for x in parts[:6]]:
+                caption += f"{p}\n\n"
+            caption += f"🔗 <a href='{novost['link']}'>Читать полностью</a>"
+            if len(caption) > 4000:
+                caption = caption[:3990] + "...</a>"
+            
+            base = f"https://api.telegram.org/bot{TG_BOT_TOKEN_KRIM}/"
+            try:
+                r = requests.post(
+                    base + "sendMessage",
+                    data={"chat_id": TG_CHAT_KRIM, "text": caption, "parse_mode": "HTML"},
+                    timeout=30,
+                )
+                if r.status_code == 200:
+                    log(f"  ✅ Опубликовано (текст): {novost['zagolovok'][:60]}")
+                    return True
+                else:
+                    log(f"  ✗ Ошибка отправки текста: {r.text[:100]}")
+            except Exception as e:
+                log(f"  ✗ Ошибка: {e}")
             continue
             
-        log(f"  ✓ Подходящая новость найдена: {novost['zagolovok'][:50]}...")
-        
-        seen_titles.add(novost["zagolovok"])
+        log(f"  [{i}] ✓ ПОДХОДИТ: {novost['zagolovok'][:50]}...")
         
         put = None
         tip = None
@@ -348,7 +375,7 @@ def obrabotat_kanal():
                 log(f"  ✗ Ошибка публикации, ищу следующую...")
                 continue
                 
-    log(f"  ⚠ Перебран весь пул, подходящих новостей с медиа не найдено.")
+    log(f"  ⚠ Перебран весь пул, подходящих новостей не найдено.")
     return False
 
 
