@@ -18,34 +18,48 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
 ]
 
-# МИРОВЫЕ НОВОСТИ НА РУССКОМ (международные источники)
+# БЕЛОРУССКИЕ ИСТОЧНИКИ НОВОСТЕЙ
 RSS_WORLD = [
-    # Российские агентства с мировыми новостями
-    "https://ria.ru/export/rss2/archive/index.xml",
-    "https://tass.ru/rss/v2.xml",
-    "https://lenta.ru/rss",
-    "https://news.rbc.ru/rbc_news.rss",
-    "https://news.mail.ru/rss/",
-    "https://vz.ru/rss",
-    
-    # Международные русскоязычные источники
-    "https://inosmi.ru/rss",
-    "https://inotv.rt.com/rss",
-    "https://russian.rt.com/rss",
-    "https://sputniknews.ru/export/rss2/archive/index.xml",
-    "https://www.gazeta.ru/rss/",
-    "https://regnum.ru/news/rss",
-    "https://www.rosbalt.ru/rss",
-    "https://news.onliner.by/feed",
+    # Белорусские государственные СМИ
     "https://www.sb.by/rss/",
-    "https://tsargrad.tv/rss",
-    "https://life.ru/rss",
-    "https://www.ntv.ru/export/ntv/rss/news.xml",
-    "https://www.5-tv.ru/rss/",
-    "https://mir24.tv/rss",
-    "https://aif.ru/rss/news.php",
-    "https://112.ru/rss",
-    "https://readovka.ru/rss",
+    "https://news.onliner.by/feed",
+    "https://mvd.gov.by/rss/",
+    "https://www.belta.by/rss/",
+    "https://naviny.by/rss/",
+    "https://charter97.org/rss.php",
+    "https://nn.by/rss",
+    "https://zviazda.by/rss",
+    "https://1tv.by/rss",
+    "https://ont.by/rss",
+    "https://stv.by/rss",
+    "https://mir24.tv/belarus/rss",
+    "https://belteleradio.by/rss",
+    
+    # Белорусские версии российских СМИ
+    "https://kp.by/rss/",
+    "https://mk.by/rss/",
+    "https://aif.by/rss/",
+    
+    # Российские источники с разделом Беларусь
+    "https://ria.ru/rss/belarus.xml",
+    "https://tass.ru/rss/v2.xml?tag=12",
+    "https://lenta.ru/rss/tags/belarus",
+    "https://rbc.ru/tags/?tag=belarus",
+]
+
+# Чёрный список тем (исключаем погоду и нерелевантное)
+BLACKLIST_SLOVA = [
+    "погода", "прогноз", "температура", "осадки", "ветер", "дождь", "снег", "метель",
+    "циклон", "антициклон", "атмосферный фронт", "гроза", "град", "туман", "гололёд",
+    "спорт", "футбол", "хоккей", "баскетбол", "олимпиада", "чемпионат", "матч",
+    "культура", "выставка", "концерт", "спектакль", "фильм", "кино", "премьера",
+    "наука", "открытие", "исследование", "учёные", "экспедиция", "космос",
+    "здоровье", "медицина", "болезнь", "вирус", "вакцина", "лекарство", "больница",
+    "образование", "школа", "университет", "студенты", "экзамен", "выпускной",
+    "туризм", "отпуск", "путешествие", "отель", "авиабилеты", "курорт",
+    "рецепт", "кулинария", "блюдо", "повар", "ресторан", "кафе",
+    "мода", "стиль", "дизайнер", "коллекция", "показ мод",
+    "гороскоп", "астрология", "знак зодиака", "таро", "гадание",
 ]
 
 seen_titles = set()
@@ -70,6 +84,34 @@ def ochistit(tekst):
 def is_russian(text):
     """Проверяет наличие кириллицы (русский язык)."""
     return bool(re.search('[а-яА-ЯёЁ]', text))
+
+
+def is_belarus_related(zag, tekst):
+    """Проверяет, что новость связана с Беларусью."""
+    z = zag.lower()
+    t = tekst.lower()
+    
+    # Ключевые слова, указывающие на Беларусь
+    belarus_words = [
+        "беларусь", "белоруссия", "минск", "белорусский", "белорусская",
+        "лукашенко", "президент рб", "совет министров рб", "национальное собрание",
+        "гродно", "брест", "гомель", "витебск", "могилёв", "бобруйск",
+        "барановичи", "борисов", "пинск", "орша", "мозырь", "солигорск",
+        "новополоцк", "лида", "молодечно", "полоцк", "жлобин", "светлогорск",
+        "речица", "слуцк", "жодино", "слоним", "кобрин", "волковыск",
+        "калиновский", "тимошенко", "белта", "онлайнер", "сб беларусь",
+        "кдб рб", "мвд рб", "прокуратура рб", "верховный суд рб",
+    ]
+    
+    return any(s in z or s in t for s in belarus_words)
+
+
+def is_weather_related(zag, tekst):
+    """Проверяет, что новость о погоде."""
+    z = zag.lower()
+    t = tekst.lower()
+    
+    return any(s in z or s in t for s in BLACKLIST_SLOVA)
 
 
 def skachat_stranitsu(ssylka):
@@ -213,7 +255,7 @@ def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=No
 
 
 def obrabotat_kanal():
-    log("=== Мировые новости ===")
+    log("=== Новости Беларуси ===")
     if not TG_BOT_TOKEN_WORLD:
         log("  Токен не задан!")
         return False
@@ -247,12 +289,24 @@ def obrabotat_kanal():
         if not is_russian(novost["zagolovok"]):
             continue
         
+        # Проверяем что новость НЕ о погоде
+        if is_weather_related(novost["zagolovok"], ""):
+            continue
+        
         tekst, kart, video = skachat_stranitsu(novost["link"])
         if not tekst:
             continue
         
         # Проверяем что текст на русском
         if not is_russian(tekst):
+            continue
+        
+        # Проверяем что новость НЕ о погоде (по тексту)
+        if is_weather_related(novost["zagolovok"], tekst):
+            continue
+        
+        # Проверяем что новость связана с Беларусью
+        if not is_belarus_related(novost["zagolovok"], tekst):
             continue
         
         parts = [p.strip() for p in tekst.split("\n\n") if len(p.strip()) > 50]
@@ -298,7 +352,7 @@ def obrabotat_kanal():
 if __name__ == "__main__":
     log("Запуск бота...")
     
-    log("🚀 Начинаю поиск мировых новостей...")
+    log("🚀 Начинаю поиск новостей Беларуси...")
     
     if obrabotat_kanal():
         log("✅ Успешно опубликовано!")
