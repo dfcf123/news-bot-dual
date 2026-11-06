@@ -11,7 +11,6 @@ from datetime import datetime
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
-# Подавляем предупреждение о парсинге XML как HTML
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 TG_BOT_TOKEN_KRIM = os.environ.get("TG_BOT_TOKEN_KRIM")
@@ -23,20 +22,16 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
 
+# ОСТАВЛЯЕМ ТОЛЬКО ТЕ ИСТОЧНИКИ, КОТОРЫЕ РЕАЛЬНО ОТДАЮТ КОНТЕНТ GITHUB ACTIONS
 SOURCES_KRIM = [
     "https://24minsk.by/tag/pistolet/feed",
     "https://www.gs.by/rss",
-    "https://news.mail.ru/rss/",
     "https://www.belarus.kp.ru/online/rss/",
     "https://rg.ru/rss/rubric/criminal/",
     "https://www.mk.ru/incidents/rss.xml",
-    "https://spbnews78.ru/rss",
     "https://russian.rt.com/rss",
-    "https://tass.ru/rss/v2.xml",
-    "https://vz.ru/rss",
 ]
 
 ZAGOLOVOK_SLOVA = [
@@ -59,7 +54,8 @@ ZAGOLOVOK_SLOVA = [
     "мвд", "омон", "росгвардия", "спецназ", "суд", "судья", "прокуратура",
     "жертва", "потерпевший", "потерпевшая", "педофил", "педофилия", "штурм", "обыск",
     "выемка", "огнестрельн", "ножевое ранение", "скрылся с места", "сбил и скрылся",
-    "мафия", "картель", "самосуд", "линчевание", "экстрадиция",
+    "мафия", "картель", "самосуд", "линчевание", "экстрадиция", "преступник", "преступление",
+    "атака", "удар", "ранение", "ликвидирован", "уничтожен", "диверсант", "подозреваемый",
 ]
 
 BLACKLIST_SLOVA = [
@@ -113,9 +109,18 @@ def is_kriminal(zag, tekst):
     if len(zag_krim) < 1:
         return False
     
-    tekst_krim_specific = [s for s in ZAGOLOVOK_SLOVA if s in t and s not in ["полиция", "милиция", "суд", "судья", "прокуратура", "мвд", "следственный"]]
-    if len(tekst_krim_specific) < 1:
-        return False
+    # Считаем криминальные слова в тексте
+    tekst_krim = [s for s in ZAGOLOVOK_SLOVA if s in t]
+    
+    # Если в заголовке очень жесткое слово, достаточно 1 совпадения в тексте
+    hard_words = ["убил", "убийца", "труп", "застрелил", "зарезал", "изнасилован", "взорвал", "похищен"]
+    if any(h in z for h in hard_words):
+        if len(tekst_krim) < 1:
+            return False
+    else:
+        # Для остальных новостей требуем хотя бы 2 совпадения в тексте
+        if len(tekst_krim) < 2:
+            return False
     
     return True
 
@@ -163,6 +168,10 @@ def skachat_stranitsu(ssylka):
                 t = p.get_text().strip()
                 if len(t) > 50:
                     tekst += t + "\n\n"
+        
+        # Защита от пустых страниц/блокировок: если текста меньше 200 символов, считаем это ошибкой
+        if len(tekst) < 200:
+            return None, None, None, 403 
         
         kartinka = None
         og = soup.find("meta", property="og:image")
@@ -262,41 +271,24 @@ def sobrat_novosti_kriminal(sources):
     seen_links = set()
     
     for source in sources:
-        if source.endswith('.xml') or 'rss' in source.lower():
-            try:
-                r = requests.get(source, headers=zag_headers, timeout=15)
-                if r.status_code == 200:
-                    feed = feedparser.parse(r.content)
-                    for entry in feed.entries[:30]:
-                        zag = ochistit(entry.get("title", "").strip())
-                        link = entry.get("link", "").strip()
-                        if zag and len(zag) > 10 and link and link not in seen_links:
-                            seen_links.add(link)
-                            vse_novosti.append({"zagolovok": zag, "link": link})
-            except:
-                pass
-        else:
-            try:
-                r = requests.get(source, headers=zag_headers, timeout=15)
-                if r.status_code == 200:
-                    soup = BeautifulSoup(r.content, "html.parser")
-                    for a in soup.find_all('a', href=True):
-                        href = a['href']
-                        title = a.get_text(strip=True)
-                        if len(title) > 30 and href.startswith('http') and href.count('/') >= 4:
-                            if not any(x in href.lower() for x in ['/page/', '/tag/', '/author/', 'login', 'search', 'rubric']):
-                                title = re.sub(r'\s+', ' ', title)
-                                if href not in seen_links:
-                                    seen_links.add(href)
-                                    vse_novosti.append({"zagolovok": title, "link": href})
-            except:
-                pass
+        try:
+            r = requests.get(source, headers=zag_headers, timeout=15)
+            if r.status_code == 200:
+                feed = feedparser.parse(r.content)
+                for entry in feed.entries[:30]:
+                    zag = ochistit(entry.get("title", "").strip())
+                    link = entry.get("link", "").strip()
+                    if zag and len(zag) > 10 and link and link not in seen_links:
+                        seen_links.add(link)
+                        vse_novosti.append({"zagolovok": zag, "link": link})
+        except:
+            pass
     
     random.shuffle(vse_novosti)
     return vse_novosti[:200]
 
 def obrabotat_kanal():
-    log("=== Криминальный вестник (РБ + РФ + Мир) ===")
+    log("=== Криминальный вестник (РБ + РФ) ===")
     if not TG_BOT_TOKEN_KRIM:
         log("  Токен не задан!")
         return False
@@ -315,15 +307,13 @@ def obrabotat_kanal():
         if novost["zagolovok"] in seen_titles:
             continue
             
-        # Теперь получаем 4 значения, включая статус ответа
         tekst, kart, video, status = skachat_stranitsu(novost["link"])
         
         if not tekst:
-            log(f"  [{i}] Пропуск: сайт вернул статус {status} (блокировка или ошибка).")
+            log(f"  [{i}] Пропуск: сайт вернул статус {status} или пустой текст (блокировка).")
             continue
             
         if not is_kriminal(novost["zagolovok"], tekst):
-            # ВАЖНО: теперь мы видим, КАКОЙ ИМЕННО заголовок отбракован
             log(f"  [{i}] Пропуск (фильтры): {novost['zagolovok'][:60]}")
             continue
             
