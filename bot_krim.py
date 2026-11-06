@@ -152,7 +152,6 @@ def skachat_stranitsu(ssylka):
         if len(tekst) < 200:
             return None, [], None, 403 
         
-        # Собираем ВСЕ картинки со страницы, чтобы была резервная опция
         kartinki = []
         og = soup.find("meta", property="og:image")
         if og and og.get("content"):
@@ -195,7 +194,6 @@ def skachat_fayl(url, tip="foto"):
         r = requests.get(url, headers={"User-Agent": random.choice(USER_AGENTS)}, timeout=30)
         if r.status_code != 200:
             return None
-        # Снизил порог до 3000 байт, чтобы пропускать маленькие, но реальные картинки
         if len(r.content) < 3000:
             return None
         if len(r.content) > 50 * 1024 * 1024:
@@ -211,9 +209,13 @@ def skachat_fayl(url, tip="foto"):
 def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=None):
     base = f"https://api.telegram.org/bot{token}/"
     
-    caption = f"<b>{zag}</b>\n\n"
+    # Экранируем спецсимволы HTML, чтобы Telegram не ругался на плохой формат
+    zag_safe = zag.replace("<", "&lt;").replace(">", "&gt;")
+    
+    caption = f"<b>{zag_safe}</b>\n\n"
     for p in parts[:4]:
-        caption += f"{p}\n\n"
+        p_safe = p.replace("<", "&lt;").replace(">", "&gt;")
+        caption += f"{p_safe}\n\n"
     caption += f"🔗 <a href='{ssylka}'>Читать полностью</a>"
     
     if len(caption) > 1020:
@@ -228,8 +230,11 @@ def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=No
                     files={"video": f},
                     timeout=60,
                 )
+                if r.status_code != 200:
+                    log(f"  ✗ Ошибка Telegram API (Видео): {r.text}")
                 return r.status_code == 200
-        except:
+        except Exception as e:
+            log(f"  ✗ Исключение при отправке видео: {e}")
             return False
     
     if foto_path:
@@ -241,8 +246,11 @@ def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=No
                     files={"photo": f},
                     timeout=30,
                 )
+                if r.status_code != 200:
+                    log(f"  ✗ Ошибка Telegram API (Фото): {r.text}")
                 return r.status_code == 200
-        except:
+        except Exception as e:
+            log(f"  ✗ Исключение при отправке фото: {e}")
             return False
     
     return False
@@ -304,7 +312,6 @@ def obrabotat_kanal():
             log(f"  [{i}] Пропуск: слишком мало текста.")
             continue
             
-        # Пытаемся скачать медиа: сначала видео (если есть), потом перебираем все найденные картинки
         put = None
         tip = None
         
@@ -314,14 +321,14 @@ def obrabotat_kanal():
                 tip = "video"
         
         if not put and kartinki:
-            for img_url in kartinki[:3]:  # Пробуем максимум 3 первые картинки
+            for img_url in kartinki[:3]:
                 put = skachat_fayl(img_url, "foto")
                 if put:
                     tip = "foto"
                     break
                     
         if not put:
-            log(f"  [{i}] Пропуск: не удалось скачать валидное медиа (все картинки отклонены или отсутствуют).")
+            log(f"  [{i}] Пропуск: не удалось скачать валидное медиа.")
             continue
             
         log(f"  [{i}] ✓ ПОДХОДИТ: {novost['zagolovok'][:50]}...")
@@ -341,7 +348,7 @@ def obrabotat_kanal():
             save_seen(seen_titles)
             return True
         else:
-            log(f"  ✗ Ошибка отправки в Telegram, ищу следующую...")
+            # Ошибка уже залогирована внутри publikovat, просто продолжаем
             continue
                 
     log("  ⚠ Перебран весь пул, подходящих новостей с медиа не найдено.")
