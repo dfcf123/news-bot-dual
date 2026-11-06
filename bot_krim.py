@@ -33,7 +33,6 @@ SOURCES_KRIM = [
     "https://russian.rt.com/rss",
 ]
 
-# МАКСИМАЛЬНО ПОЛНЫЙ СПИСОК КРИМИНАЛЬНЫХ СЛОВ
 ZAGOLOVOK_SLOVA = [
     "убийств", "убил", "убила", "убийца", "труп", "задержан", "задержана", "задержали", "задержание",
     "арестован", "арестована", "арест", "осужден", "осуждена", "приговорен", "приговорили", "приговор", "осудили",
@@ -97,20 +96,12 @@ def ochistit(tekst):
 def is_kriminal(zag, tekst):
     z = zag.lower()
     t = tekst.lower()
-    
-    # 1. Проверка черного списка
     if any(s in z or s in t for s in BLACKLIST_SLOVA):
         return False
-    
-    # 2. Считаем совпадения криминальных слов
     zag_matches = [s for s in ZAGOLOVOK_SLOVA if s in z]
     tekst_matches = [s for s in ZAGOLOVOK_SLOVA if s in t]
-    
-    # 3. Простая и надежная логика: 
-    # Если в заголовке есть хотя бы 1 криминальное слово И в тексте есть хотя бы 1 криминальное слово -> это новость.
     if len(zag_matches) >= 1 and len(tekst_matches) >= 1:
         return True
-        
     return False
 
 def skachat_stranitsu(ssylka):
@@ -123,7 +114,7 @@ def skachat_stranitsu(ssylka):
     try:
         r = requests.get(ssylka, headers=headers, timeout=20)
         if r.status_code != 200:
-            return None, None, None, r.status_code
+            return None, [], None, r.status_code
         
         soup = BeautifulSoup(r.content, "html.parser")
         
@@ -133,7 +124,7 @@ def skachat_stranitsu(ssylka):
                 date_str = meta_date["content"].split("T")[0]
                 pub_date = datetime.strptime(date_str, "%Y-%m-%d")
                 if (datetime.now() - pub_date).days > 14:
-                    return None, None, None, 200
+                    return None, [], None, 200
         except:
             pass
         
@@ -158,22 +149,25 @@ def skachat_stranitsu(ssylka):
                 if len(t) > 50:
                     tekst += t + "\n\n"
         
-        # Защита от блокировок: если текста меньше 200 символов, считаем это пустой страницей
         if len(tekst) < 200:
-            return None, None, None, 403 
+            return None, [], None, 403 
         
-        kartinka = None
+        # Собираем ВСЕ картинки со страницы, чтобы была резервная опция
+        kartinki = []
         og = soup.find("meta", property="og:image")
         if og and og.get("content"):
-            kartinka = og["content"]
-        if not kartinka:
-            for img in soup.find_all("img"):
-                src = img.get("src") or img.get("data-src")
-                if src and len(src) > 20:
-                    if not src.startswith("http"):
-                        src = urljoin(ssylka, src)
-                    kartinka = src
-                    break
+            src = og["content"]
+            if not src.startswith("http"):
+                src = urljoin(ssylka, src)
+            kartinki.append(src)
+            
+        for img in soup.find_all("img"):
+            src = img.get("src") or img.get("data-src")
+            if src and len(src) > 20:
+                if not src.startswith("http"):
+                    src = urljoin(ssylka, src)
+                if src not in kartinki:
+                    kartinki.append(src)
         
         video_url = None
         ogv = soup.find("meta", property="og:video")
@@ -189,21 +183,20 @@ def skachat_stranitsu(ssylka):
         tekst = ochistit(tekst)
         if len(tekst) > 5000:
             tekst = tekst[:5000]
-        if kartinka and not kartinka.startswith("http"):
-            kartinka = urljoin(ssylka, kartinka)
         if video_url and not video_url.startswith("http"):
             video_url = urljoin(ssylka, video_url)
         
-        return tekst, kartinka, video_url, 200
+        return tekst, kartinki, video_url, 200
     except Exception:
-        return None, None, None, 0
+        return None, [], None, 0
 
 def skachat_fayl(url, tip="foto"):
     try:
         r = requests.get(url, headers={"User-Agent": random.choice(USER_AGENTS)}, timeout=30)
         if r.status_code != 200:
             return None
-        if len(r.content) < 10000:
+        # Снизил порог до 3000 байт, чтобы пропускать маленькие, но реальные картинки
+        if len(r.content) < 3000:
             return None
         if len(r.content) > 50 * 1024 * 1024:
             return None
@@ -296,10 +289,10 @@ def obrabotat_kanal():
         if novost["zagolovok"] in seen_titles:
             continue
             
-        tekst, kart, video, status = skachat_stranitsu(novost["link"])
+        tekst, kartinki, video, status = skachat_stranitsu(novost["link"])
         
         if not tekst:
-            log(f"  [{i}] Пропуск: сайт вернул статус {status} или пустой текст (блокировка).")
+            log(f"  [{i}] Пропуск: сайт вернул статус {status} или пустой текст.")
             continue
             
         if not is_kriminal(novost["zagolovok"], tekst):
@@ -311,40 +304,45 @@ def obrabotat_kanal():
             log(f"  [{i}] Пропуск: слишком мало текста.")
             continue
             
-        if not kart and not video:
-            log(f"  [{i}] Пропуск: нет медиа (фото/видео).")
+        # Пытаемся скачать медиа: сначала видео (если есть), потом перебираем все найденные картинки
+        put = None
+        tip = None
+        
+        if video:
+            put = skachat_fayl(video, "video")
+            if put:
+                tip = "video"
+        
+        if not put and kartinki:
+            for img_url in kartinki[:3]:  # Пробуем максимум 3 первые картинки
+                put = skachat_fayl(img_url, "foto")
+                if put:
+                    tip = "foto"
+                    break
+                    
+        if not put:
+            log(f"  [{i}] Пропуск: не удалось скачать валидное медиа (все картинки отклонены или отсутствуют).")
             continue
             
         log(f"  [{i}] ✓ ПОДХОДИТ: {novost['zagolovok'][:50]}...")
         
-        put = None
-        tip = None
-        if video:
-            put = skachat_fayl(video, "video")
-            tip = "video"
-        if not put and kart:
-            put = skachat_fayl(kart, "foto")
-            tip = "foto"
-            
-        if put:
-            ok = publikovat(
-                TG_BOT_TOKEN_KRIM, TG_CHAT_KRIM,
-                ochistit(novost["zagolovok"]),
-                [ochistit(x) for x in parts],
-                novost["link"],
-                foto_path=put if tip == "foto" else None,
-                video_path=put if tip == "video" else None,
-            )
-            if ok:
-                log(f"  ✅ Опубликовано: {novost['zagolovok'][:60]}")
-                seen_titles.add(novost["zagolovok"])
-                save_seen(seen_titles)
-                return True
-            else:
-                log(f"  ✗ Ошибка отправки в Telegram, ищу следующую...")
-                continue
+        ok = publikovat(
+            TG_BOT_TOKEN_KRIM, TG_CHAT_KRIM,
+            ochistit(novost["zagolovok"]),
+            [ochistit(x) for x in parts],
+            novost["link"],
+            foto_path=put if tip == "foto" else None,
+            video_path=put if tip == "video" else None,
+        )
+        
+        if ok:
+            log(f"  ✅ Опубликовано: {novost['zagolovok'][:60]}")
+            seen_titles.add(novost["zagolovok"])
+            save_seen(seen_titles)
+            return True
         else:
-            log(f"  [{i}] Пропуск: не удалось скачать файл медиа.")
+            log(f"  ✗ Ошибка отправки в Telegram, ищу следующую...")
+            continue
                 
     log("  ⚠ Перебран весь пул, подходящих новостей с медиа не найдено.")
     return False
