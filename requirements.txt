@@ -1,5 +1,5 @@
-requests
-feedparser
-beautifulsoup4
-vk-api
-Pillow
+requests==2.31.0
+feedparser==6.0.10
+beautifulsoup4==4.12.2
+vk-api==11.9.9
+Pillow==10.0.0
