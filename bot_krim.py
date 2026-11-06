@@ -16,7 +16,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
 
-# ТОЛЬКО КРИМИНАЛЬНЫЕ РАЗДЕЛЫ
 RSS_KRIM = [
     "https://24minsk.by/tag/pistolet/feed",
     "https://www.gs.by/rss",
@@ -84,13 +83,13 @@ def is_kriminal(zag, tekst):
     z = zag.lower()
     t = tekst.lower()
     if any(s in z or s in t for s in BLACKLIST_SLOVA):
-        return False, "blacklist"
+        return False
     if not any(s in z for s in ZAGOLOVOK_SLOVA):
-        return False, "no_zag_krim"
+        return False
     specific = [s for s in ZAGOLOVOK_SLOVA if s in t and s not in ["полиция", "милиция", "суд", "судья", "прокуратура", "мвд"]]
-    if len(specific) < 2:
-        return False, f"few_tekst ({len(specific)})"
-    return True, "ok"
+    if len(specific) < 1:
+        return False
+    return True
 
 
 def skachat_stranitsu(ssylka):
@@ -164,21 +163,45 @@ def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=No
     caption += f"🔗 <a href='{ssylka}'>Читать полностью</a>"
     if len(caption) > 1020:
         caption = caption[:1010] + "...</a>"
+    
     if video_path:
         try:
             with open(video_path, "rb") as f:
                 r = requests.post(base + "sendVideo", data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}, files={"video": f}, timeout=60)
+            if r.status_code != 200:
+                log(f"  ✗ Ошибка видео: {r.text[:100]}")
             return r.status_code == 200
-        except:
+        except Exception as e:
+            log(f"  ✗ Исключение видео: {e}")
             return False
+            
     if foto_path:
         try:
             with open(foto_path, "rb") as f:
                 r = requests.post(base + "sendPhoto", data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}, files={"photo": f}, timeout=30)
+            if r.status_code != 200:
+                log(f"  ✗ Ошибка фото: {r.text[:100]}")
             return r.status_code == 200
-        except:
+        except Exception as e:
+            log(f"  ✗ Исключение фото: {e}")
             return False
-    return False
+            
+    # Если нет медиа — отправляем как текст
+    text_msg = f"<b>{zag}</b>\n\n"
+    for p in parts[:8]:
+        text_msg += f"{p}\n\n"
+    text_msg += f"🔗 <a href='{ssylka}'>Читать полностью</a>"
+    if len(text_msg) > 4000:
+        text_msg = text_msg[:3990] + "...</a>"
+        
+    try:
+        r = requests.post(base + "sendMessage", data={"chat_id": chat_id, "text": text_msg, "parse_mode": "HTML"}, timeout=30)
+        if r.status_code != 200:
+            log(f"  ✗ Ошибка текста: {r.text[:100]}")
+        return r.status_code == 200
+    except Exception as e:
+        log(f"  ✗ Исключение текста: {e}")
+        return False
 
 
 def sobrat_novosti(sources):
@@ -202,7 +225,7 @@ def sobrat_novosti(sources):
 
 
 def obrabotat_kanal():
-    log("=== Криминальный вестник (отладка) ===")
+    log("=== Криминальный вестник ===")
     if not TG_BOT_TOKEN_KRIM:
         log("Токен не задан!")
         return False
@@ -214,39 +237,33 @@ def obrabotat_kanal():
             log(f"Проверено {i}/{len(vse)}...")
         tekst, kart, video = skachat_stranitsu(n["link"])
         if not tekst:
-            log(f"[{i}] ✗ Нет текста: {n['zagolovok'][:40]}...")
             continue
-        ok, reason = is_kriminal(n["zagolovok"], tekst)
-        if not ok:
-            log(f"[{i}] ✗ {reason}: {n['zagolovok'][:40]}...")
+        if not is_kriminal(n["zagolovok"], tekst):
             continue
         parts = [p.strip() for p in tekst.split("\n\n") if len(p.strip()) > 50]
         if len(parts) < 2:
-            log(f"[{i}] ✗ Мало абзацев ({len(parts)}): {n['zagolovok'][:40]}...")
             continue
-        if not kart and not video:
-            log(f"[{i}] ⚠ Нет медиа, отправляю как текст: {n['zagolovok'][:40]}...")
-            caption = f"<b>{ochistit(n['zagolovok'])}</b>\n\n"
-            for p in [ochistit(x) for x in parts[:6]]:
-                caption += f"{p}\n\n"
-            caption += f"🔗 <a href='{n['link']}'>Читать полностью</a>"
-            if len(caption) > 4000:
-                caption = caption[:3990] + "...</a>"
-            base = f"https://api.telegram.org/bot{TG_BOT_TOKEN_KRIM}/"
-            try:
-                r = requests.post(base + "sendMessage", data={"chat_id": TG_CHAT_KRIM, "text": caption, "parse_mode": "HTML"}, timeout=30)
-                if r.status_code == 200:
-                    log(f"✅ Опубликовано (текст): {n['zagolovok'][:60]}")
-                    return True
-            except:
-                pass
-            continue
-        log(f"[{i}] ✓ ПОДХОДИТ: {n['zagolovok'][:50]}...")
-        put = skachat_fayl(kart) if kart else None
-        if put:
-            if publikovat(TG_BOT_TOKEN_KRIM, TG_CHAT_KRIM, ochistit(n["zagolovok"]), [ochistit(x) for x in parts], n["link"], foto_path=put):
-                log(f"✅ Опубликовано: {n['zagolovok'][:60]}")
-                return True
+            
+        log(f"  [{i}] ✓ ПОДХОДИТ: {n['zagolovok'][:50]}...")
+        
+        put = None
+        tip = None
+        if video:
+            put = skachat_fayl(video, "video")
+            tip = "video"
+        if not put and kart:
+            put = skachat_fayl(kart, "foto")
+            tip = "foto"
+            
+        if not put:
+            log(f"  [{i}] ⚠ Не удалось скачать медиа, пробую как текст...")
+            
+        if publikovat(TG_BOT_TOKEN_KRIM, TG_CHAT_KRIM, ochistit(n["zagolovok"]), [ochistit(x) for x in parts], n["link"], foto_path=put if tip=="foto" else None, video_path=put if tip=="video" else None):
+            log(f"  ✅ Опубликовано: {n['zagolovok'][:60]}")
+            return True
+        else:
+            log(f"  ✗ Не удалось опубликовать, ищу следующую...")
+            
     log("⚠ Ничего не подошло.")
     return False
 
