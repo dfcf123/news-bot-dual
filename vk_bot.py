@@ -215,29 +215,46 @@ def download_image(url):
         log(f"  ⚠ Ошибка скачивания картинки: {e}")
         return None
 
-def upload_photo(vk, group_id_int, temp_file):
+def upload_photo_to_vk(vk, group_id_int, temp_file):
+    """Загружает фото через upload URL для стены"""
     try:
-        upload_data = vk.photos.getWallUploadServer(group_id=group_id_int)
-        upload_url = upload_data['upload_url']
+        # Получаем URL для загрузки
+        upload_server = vk.photos.getWallUploadServer(group_id=group_id_int)
+        upload_url = upload_server['upload_url']
         
+        log(f"  📤 Загружаю фото на сервер ВК...")
+        
+        # Загружаем файл
         with open(temp_file, 'rb') as f:
-            upload_response = requests.post(upload_url, files={'photo': f})
+            files = {'photo': f}
+            response = requests.post(upload_url, files=files)
         
-        data = upload_response.json()
-        if 'photo' not in data:
+        upload_data = response.json()
+        
+        if 'photo' not in upload_data or 'server' not in upload_data or 'hash' not in upload_data:
+            log(f"  ⚠ Ошибка: сервер не вернул нужные данные: {upload_data}")
             return None
         
-        saved = vk.photos.saveWallPhoto(
+        # Сохраняем фото
+        log(f"  💾 Сохраняю фото в ВК...")
+        saved_photo = vk.photos.saveWallPhoto(
             group_id=group_id_int,
-            photo=data['photo'],
-            server=data['server'],
-            hash=data['hash']
+            photo=upload_data['photo'],
+            server=upload_data['server'],
+            hash=upload_data['hash']
         )
-        if saved and len(saved) > 0:
-            return f"photo{saved[0]['owner_id']}_{saved[0]['id']}"
+        
+        if saved_photo and len(saved_photo) > 0:
+            photo_id = f"photo{saved_photo[0]['owner_id']}_{saved_photo[0]['id']}"
+            log(f"  ✓ Фото сохранено: {photo_id}")
+            return photo_id
+        else:
+            log(f"  ⚠ Ошибка сохранения фото: {saved_photo}")
+            return None
+            
     except Exception as e:
-        log(f"  ⚠ Ошибка загрузки фото в ВК: {e}")
-    return None
+        log(f"  ❌ Ошибка загрузки фото: {e}")
+        return None
 
 def format_post(news_item):
     title = news_item['title']
@@ -259,21 +276,24 @@ def post_to_vk(news_item):
         temp_file = None
         
         if news_item.get('image'):
-            log(f"  🖼 Загружаю фото...")
+            log(f"  🖼 Найдено фото: {news_item['image'][:80]}...")
             temp_file = download_image(news_item['image'])
+            
             if temp_file:
                 group_id_int = int(VK_GROUP_ID.lstrip('-'))
-                attachment = upload_photo(vk, group_id_int, temp_file)
+                attachment = upload_photo_to_vk(vk, group_id_int, temp_file)
+                
                 try:
                     os.remove(temp_file)
                 except Exception:
                     pass
                 
                 if attachment:
-                    log(f"  ✓ Фото загружено")
+                    log(f"  ✅ Фото загружено успешно!")
                 else:
                     log(f"  ⚠ Публикуем без фото")
         
+        log(f"  📝 Публикую пост...")
         vk.wall.post(
             owner_id=int(VK_GROUP_ID),
             message=post_text,
@@ -293,7 +313,7 @@ def main():
     log("=" * 60)
     
     if not VK_ACCESS_TOKEN or "ВСТАВЬТЕ" in VK_ACCESS_TOKEN or not VK_GROUP_ID.startswith('-'):
-        log("❌ Ошибка настроек!")
+        log(" Ошибка настроек!")
         return
     
     try:
