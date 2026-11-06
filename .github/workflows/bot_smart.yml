@@ -1,0 +1,30 @@
+name: Smart Bot
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install requirements
+        run: pip install -r requirements.txt
+
+      - name: Run smart bot
+        env:
+          TG_BOT_TOKEN_SMART: ${{ secrets.TG_BOT_TOKEN_SMART }}
+          TG_CHAT_SMART: ${{ secrets.TG_CHAT_SMART }}
+        run: python bot_smart.py
