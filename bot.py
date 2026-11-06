@@ -29,19 +29,58 @@ RSS_WORLD = [
     "https://vz.ru/rss",
 ]
 
+# РАСШИРЕННЫЙ СПИСОК ИСТОЧНИКОВ КРИМИНАЛЬНЫХ НОВОСТЕЙ (МИРОВЫЕ + РОССИЙСКИЕ)
 SOURCES_KRIM = [
+    # RSS-ленты
+    "https://ria.ru/rss/incidents.xml",
+    "https://lenta.ru/rss/news/crime",
+    "https://www.gazeta.ru/social/crime/rss.shtml",
     "https://www.mk.ru/incidents/rss.xml",
+    "https://www.kp.ru/daily/incidents/rss/",
     "https://newinform.com/rss",
     "https://rg.ru/rss/rubric/criminal/",
     "https://russian.rt.com/rss",
     "https://www.vesti.ru/rss",
     "https://www.mzk2.ru/feed",
     "https://noctu.ru/feed",
+    "https://inosmi.ru/rss",
+    "https://inotv.rt.com/rss",
+    "https://tsargrad.tv/rss",
+    "https://www.rosbalt.ru/rss",
+    "https://regnum.ru/news/rss",
+    "https://life.ru/rss",
+    "https://ren.tv/rss",
+    "https://www.ntv.ru/export/ntv/rss/news.xml",
+    "https://www.5-tv.ru/rss/",
+    "https://mir24.tv/rss",
+    "https://aif.ru/rss/news.php",
+    "https://news.onliner.by/feed",
+    "https://www.sb.by/rss/",
+    "https://mvd.gov.by/rss/",
+    "https://crimea.ria.ru/crime/rss/",
+    "https://112.ru/rss",
+    "https://baza.media/rss",
+    "https://readovka.ru/rss",
+    
+    # HTML-страницы для глубокого парсинга (архив за 2 недели)
+    "https://ria.ru/incidents/",
+    "https://lenta.ru/news/crime/",
+    "https://www.gazeta.ru/social/crime.shtml",
+    "https://inosmi.ru/criminal/",
+    "https://inotv.rt.com/",
+    "https://www.rosbalt.ru/news/crime",
+    "https://regnum.ru/news/crime",
+    "https://tsargrad.tv/news/crime",
+    "https://life.ru/crime",
+    "https://baza.media/",
+    "https://readovka.ru/news/crime",
+    "https://www.ntv.ru/crime/",
+    "https://www.5-tv.ru/incidents/",
     "https://www.mk.ru/incidents/",
     "https://newinform.com/category/proisshestviya/",
     "https://rg.ru/rubric/criminal/",
     "https://www.kp.ru/daily/incidents/",
-    "https://www.vesti.ru/incidents"
+    "https://www.vesti.ru/incidents",
 ]
 
 ZAGOLOVOK_SLOVA = [
@@ -63,6 +102,8 @@ ZAGOLOVOK_SLOVA = [
     "мвд", "омон", "росгвардия", "спецназ", "суд", "судья", "приговор", "прокуратура",
     "жертва", "потерпевший", "потерпевшая", "педофил", "педофилия", "штурм", "обыск",
     "выемка", "огнестрельн", "ножевое ранение", "скрылся с места", "сбил и скрылся",
+    "фбр", "фби", "интерпол", "европол", "картель", "мафия", "сицилийская", "якудза",
+    "триада", "наркобарон", "наркоторговец", "контрабанда", "трафикинг",
 ]
 
 TEKST_SLOVA = ZAGOLOVOK_SLOVA + [
@@ -297,7 +338,7 @@ def sobrat_novosti_kriminal(sources):
                 pass
     
     random.shuffle(vse_novosti)
-    return vse_novosti[:150]
+    return vse_novosti[:200]
 
 
 def obrabotat_kanal(name, token, chat_id, sources_list, strict_kriminal):
