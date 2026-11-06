@@ -26,7 +26,5 @@ jobs:
       - name: Run bot
         env:
           TG_BOT_TOKEN_WORLD: ${{ secrets.TG_BOT_TOKEN_WORLD }}
-          TG_BOT_TOKEN_KRIM: ${{ secrets.TG_BOT_TOKEN_KRIM }}
           TG_CHAT_WORLD: ${{ secrets.TG_CHAT_WORLD }}
-          TG_CHAT_KRIM: ${{ secrets.TG_CHAT_KRIM }}
         run: python bot.py
