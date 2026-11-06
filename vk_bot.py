@@ -17,7 +17,8 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
-VK_ACCESS_TOKEN = os.environ.get("VK_ACCESS_TOKEN", "")
+VK_ACCESS_TOKEN = os.environ.get("VK_ACCESS_TOKEN", "vk1.a.ng2wvH2rNqkxkYvfj7Rslo3EWS9dwsW4HpxgJb02_oQisICqFpC5pljEDPfZgy2jgLaYzsBtdassbdGHeANk6dSnzLPisjetf671WIKmJDRfmMQ2Sz8avFWGQvsSWHDFAxxKFUUSlaSk1Pw1ChYGRrTp0z8x6zk_DfaAasYNaOsmyrPJnfKENItk0B1xz1LPVG9dfySF11RLAmAjsW-qCg
+")
 VK_GROUP_ID = os.environ.get("VK_GROUP_ID", "-183445484")
 
 NEWS_SOURCES = [
