@@ -10,9 +10,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 TG_BOT_TOKEN_WORLD = os.environ.get("TG_BOT_TOKEN_WORLD")
-TG_BOT_TOKEN_KRIM = os.environ.get("TG_BOT_TOKEN_KRIM")
 TG_CHAT_WORLD = os.environ.get("TG_CHAT_WORLD", "@dfcf1980")
-TG_CHAT_KRIM = os.environ.get("TG_CHAT_KRIM", "@kriminal_vestnik")
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -20,108 +18,34 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
 ]
 
+# МИРОВЫЕ НОВОСТИ НА РУССКОМ (международные источники)
 RSS_WORLD = [
+    # Российские агентства с мировыми новостями
     "https://ria.ru/export/rss2/archive/index.xml",
     "https://tass.ru/rss/v2.xml",
     "https://lenta.ru/rss",
     "https://news.rbc.ru/rbc_news.rss",
     "https://news.mail.ru/rss/",
     "https://vz.ru/rss",
-]
-
-# РАСШИРЕННЫЙ СПИСОК ИСТОЧНИКОВ КРИМИНАЛЬНЫХ НОВОСТЕЙ (МИРОВЫЕ + РОССИЙСКИЕ)
-SOURCES_KRIM = [
-    # RSS-ленты
-    "https://ria.ru/rss/incidents.xml",
-    "https://lenta.ru/rss/news/crime",
-    "https://www.gazeta.ru/social/crime/rss.shtml",
-    "https://www.mk.ru/incidents/rss.xml",
-    "https://www.kp.ru/daily/incidents/rss/",
-    "https://newinform.com/rss",
-    "https://rg.ru/rss/rubric/criminal/",
-    "https://russian.rt.com/rss",
-    "https://www.vesti.ru/rss",
-    "https://www.mzk2.ru/feed",
-    "https://noctu.ru/feed",
+    
+    # Международные русскоязычные источники
     "https://inosmi.ru/rss",
     "https://inotv.rt.com/rss",
-    "https://tsargrad.tv/rss",
-    "https://www.rosbalt.ru/rss",
+    "https://russian.rt.com/rss",
+    "https://sputniknews.ru/export/rss2/archive/index.xml",
+    "https://www.gazeta.ru/rss/",
     "https://regnum.ru/news/rss",
+    "https://www.rosbalt.ru/rss",
+    "https://news.onliner.by/feed",
+    "https://www.sb.by/rss/",
+    "https://tsargrad.tv/rss",
     "https://life.ru/rss",
-    "https://ren.tv/rss",
     "https://www.ntv.ru/export/ntv/rss/news.xml",
     "https://www.5-tv.ru/rss/",
     "https://mir24.tv/rss",
     "https://aif.ru/rss/news.php",
-    "https://news.onliner.by/feed",
-    "https://www.sb.by/rss/",
-    "https://mvd.gov.by/rss/",
-    "https://crimea.ria.ru/crime/rss/",
     "https://112.ru/rss",
-    "https://baza.media/rss",
     "https://readovka.ru/rss",
-    
-    # HTML-страницы для глубокого парсинга (архив за 2 недели)
-    "https://ria.ru/incidents/",
-    "https://lenta.ru/news/crime/",
-    "https://www.gazeta.ru/social/crime.shtml",
-    "https://inosmi.ru/criminal/",
-    "https://inotv.rt.com/",
-    "https://www.rosbalt.ru/news/crime",
-    "https://regnum.ru/news/crime",
-    "https://tsargrad.tv/news/crime",
-    "https://life.ru/crime",
-    "https://baza.media/",
-    "https://readovka.ru/news/crime",
-    "https://www.ntv.ru/crime/",
-    "https://www.5-tv.ru/incidents/",
-    "https://www.mk.ru/incidents/",
-    "https://newinform.com/category/proisshestviya/",
-    "https://rg.ru/rubric/criminal/",
-    "https://www.kp.ru/daily/incidents/",
-    "https://www.vesti.ru/incidents",
-]
-
-ZAGOLOVOK_SLOVA = [
-    "убийств", "убил", "убила", "убийца", "труп", "задержан", "задержана", "задержали",
-    "арестован", "арестована", "осужден", "осуждена", "приговорен", "приговорили",
-    "кража", "украл", "украла", "ограбление", "ограбил", "обокрали", "мошенник",
-    "мошенница", "мошенничество", "мошенники", "наркотик", "наркотики", "закладка",
-    "наркоман", "разбой", "нападение", "напал", "напала", "избил", "избиение",
-    "погиб", "погибла", "погибли", "погибший", "ранен", "ранена", "ранены", "ранение",
-    "дтп", "авария", "сбил", "поджог", "поджег", "подожгла", "взрыв", "взорвал",
-    "взорвалась", "изнасилован", "изнасилование", "домогательство", "похищен",
-    "похитил", "похитила", "заложник", "хулиган", "хулиганство", "дебош", "драка",
-    "вымогатель", "вымогательство", "шантаж", "коррупция", "взяточник", "взятка",
-    "бандит", "банда", "преступная группа", "теракт", "террорист", "диверсия",
-    "зарезал", "зарезан", "стрелял", "стрельба", "расстрелян", "застрелил",
-    "застрелился", "удушил", "задушил", "найден труп", "обнаружен труп",
-    "обнаружено тело", "расчленен", "изувечен", "пропал без вести", "разыскивается",
-    "ск ", "следователь", "возбуждено дело", "уголовное дело", "полиция", "милиция",
-    "мвд", "омон", "росгвардия", "спецназ", "суд", "судья", "приговор", "прокуратура",
-    "жертва", "потерпевший", "потерпевшая", "педофил", "педофилия", "штурм", "обыск",
-    "выемка", "огнестрельн", "ножевое ранение", "скрылся с места", "сбил и скрылся",
-    "фбр", "фби", "интерпол", "европол", "картель", "мафия", "сицилийская", "якудза",
-    "триада", "наркобарон", "наркоторговец", "контрабанда", "трафикинг",
-]
-
-TEKST_SLOVA = ZAGOLOVOK_SLOVA + [
-    "преступление", "преступник", "правонарушение", "криминал", "криминальный",
-    "оперативник", "допрос", "экспертиза", "свидетель", "очевидец", "хищение",
-    "растрата", "аферист", "афера", "рэкет",
-]
-
-BLACKLIST_SLOVA = [
-    "погода", "прогноз", "температура", "осадки", "ветер", "дождь", "снег",
-    "спорт", "футбол", "хоккей", "баскетбол", "олимпиада", "чемпионат", "матч",
-    "культура", "выставка", "концерт", "спектакль", "фильм", "кино", "премьера",
-    "экономика", "курс валют", "инфляция", "ввп", "бюджет", "налоги", "пенсия",
-    "политика", "выборы", "парламент", "президент", "министр", "закон", "реформа",
-    "наука", "открытие", "исследование", "учёные", "экспедиция", "космос",
-    "здоровье", "медицина", "болезнь", "вирус", "вакцина", "лекарство",
-    "образование", "школа", "университет", "студенты", "экзамен",
-    "туризм", "отпуск", "путешествие", "отель", "авиабилеты",
 ]
 
 seen_titles = set()
@@ -143,23 +67,9 @@ def ochistit(tekst):
     return tekst.strip()
 
 
-def is_kriminal(zag, tekst):
-    """Ужесточённая проверка на криминальную тематику."""
-    z = zag.lower()
-    t = tekst.lower()
-    
-    if any(s in z or s in t for s in BLACKLIST_SLOVA):
-        return False
-    
-    zag_krim = [s for s in ZAGOLOVOK_SLOVA if s in z]
-    if len(zag_krim) < 2:
-        return False
-    
-    tekst_krim_specific = [s for s in ZAGOLOVOK_SLOVA if s in t and s not in ["полиция", "милиция", "суд", "судья", "прокуратура", "мвд"]]
-    if len(tekst_krim_specific) < 3:
-        return False
-    
-    return True
+def is_russian(text):
+    """Проверяет наличие кириллицы (русский язык)."""
+    return bool(re.search('[а-яА-ЯёЁ]', text))
 
 
 def skachat_stranitsu(ssylka):
@@ -177,6 +87,7 @@ def skachat_stranitsu(ssylka):
         
         soup = BeautifulSoup(r.text, "html.parser")
         
+        # Проверка даты (не старше 14 дней)
         try:
             meta_date = soup.find("meta", property="article:published_time")
             if meta_date and meta_date.get("content"):
@@ -301,94 +212,58 @@ def publikovat(token, chat_id, zag, parts, ssylka, foto_path=None, video_path=No
     return False
 
 
-def sobrat_novosti_kriminal(sources):
-    vse_novosti = []
-    zag_headers = {"User-Agent": random.choice(USER_AGENTS)}
-    seen_links = set()
-    
-    for source in sources:
-        if source.endswith('.xml') or 'rss' in source.lower():
-            try:
-                r = requests.get(source, headers=zag_headers, timeout=15)
-                if r.status_code == 200:
-                    feed = feedparser.parse(r.text)
-                    for entry in feed.entries[:30]:
-                        zag = ochistit(entry.get("title", "").strip())
-                        link = entry.get("link", "").strip()
-                        if zag and len(zag) > 10 and link and link not in seen_links:
-                            seen_links.add(link)
-                            vse_novosti.append({"zagolovok": zag, "link": link})
-            except:
-                pass
-        else:
-            try:
-                r = requests.get(source, headers=zag_headers, timeout=15)
-                if r.status_code == 200:
-                    soup = BeautifulSoup(r.text, "html.parser")
-                    for a in soup.find_all('a', href=True):
-                        href = a['href']
-                        title = a.get_text(strip=True)
-                        if len(title) > 30 and href.startswith('http') and href.count('/') >= 4:
-                            if not any(x in href.lower() for x in ['/page/', '/tag/', '/author/', 'login', 'search', 'rubric']):
-                                title = re.sub(r'\s+', ' ', title)
-                                if href not in seen_links:
-                                    seen_links.add(href)
-                                    vse_novosti.append({"zagolovok": title, "link": href})
-            except:
-                pass
-    
-    random.shuffle(vse_novosti)
-    return vse_novosti[:200]
-
-
-def obrabotat_kanal(name, token, chat_id, sources_list, strict_kriminal):
-    log(f"=== {name} ===")
-    if not token:
-        log(f"  Токен не задан, пропускаю.")
+def obrabotat_kanal():
+    log("=== Мировые новости ===")
+    if not TG_BOT_TOKEN_WORLD:
+        log("  Токен не задан!")
         return False
     
-    log(f"  Сбор пула новостей (RSS + HTML разделы)...")
-    vse_novosti = sobrat_novosti_kriminal(sources_list) if strict_kriminal else []
+    vse = []
+    zag_headers = {"User-Agent": random.choice(USER_AGENTS)}
     
-    if not strict_kriminal:
-        zag_headers = {"User-Agent": random.choice(USER_AGENTS)}
-        for url in sources_list:
-            try:
-                r = requests.get(url, headers=zag_headers, timeout=15)
-                if r.status_code == 200:
-                    feed = feedparser.parse(r.text)
-                    for entry in feed.entries[:30]:
-                        zag = ochistit(entry.get("title", "").strip())
-                        link = entry.get("link", "").strip()
-                        if zag and len(zag) > 10 and link and link not in [x['link'] for x in vse_novosti]:
-                            vse_novosti.append({"zagolovok": zag, "link": link})
-            except:
-                pass
-        random.shuffle(vse_novosti)
-
-    log(f"  Найдено {len(vse_novosti)} уникальных ссылок. Начинаю глубокий перебор...")
+    for url in RSS_WORLD:
+        try:
+            r = requests.get(url, headers=zag_headers, timeout=15)
+            if r.status_code != 200:
+                log(f"  RSS {url[:30]}... — ошибка {r.status_code}")
+                continue
+            feed = feedparser.parse(r.text)
+            for entry in feed.entries[:30]:
+                zag = ochistit(entry.get("title", "").strip())
+                link = entry.get("link", "").strip()
+                if zag and len(zag) > 10 and link:
+                    vse.append({"zagolovok": zag, "link": link})
+        except Exception as e:
+            log(f"  Ошибка RSS {url[:30]}...: {str(e)[:50]}")
     
-    for i, novost in enumerate(vse_novosti, 1):
-        if i % 20 == 0:
-            log(f"  Проверено {i} из {len(vse_novosti)}...")
-            
-        tekst, kart, video = skachat_stranitsu(novost["link"])
+    log(f"  Найдено {len(vse)} новостей.")
+    if not vse:
+        return False
+    
+    random.shuffle(vse)
+    
+    for novost in vse:
+        # Проверяем что новость на русском
+        if not is_russian(novost["zagolovok"]):
+            continue
         
+        tekst, kart, video = skachat_stranitsu(novost["link"])
         if not tekst:
             continue
-            
-        if strict_kriminal and not is_kriminal(novost["zagolovok"], tekst):
+        
+        # Проверяем что текст на русском
+        if not is_russian(tekst):
             continue
-            
+        
         parts = [p.strip() for p in tekst.split("\n\n") if len(p.strip()) > 50]
         if len(parts) < 2:
             continue
-            
+        
+        # МЕДИА ОБЯЗАТЕЛЬНО
         if not kart and not video:
             continue
-            
-        log(f"  ✓ Подходящая новость найдена: {novost['zagolovok'][:50]}...")
         
+        log(f"  ✓ Найдена: {novost['zagolovok'][:50]}...")
         seen_titles.add(novost["zagolovok"])
         
         put = None
@@ -399,10 +274,10 @@ def obrabotat_kanal(name, token, chat_id, sources_list, strict_kriminal):
         if not put and kart:
             put = skachat_fayl(kart, "foto")
             tip = "foto"
-            
+        
         if put:
             ok = publikovat(
-                token, chat_id,
+                TG_BOT_TOKEN_WORLD, TG_CHAT_WORLD,
                 ochistit(novost["zagolovok"]),
                 [ochistit(x) for x in parts],
                 novost["link"],
@@ -410,29 +285,22 @@ def obrabotat_kanal(name, token, chat_id, sources_list, strict_kriminal):
                 video_path=put if tip == "video" else None,
             )
             if ok:
-                log(f"  ✅ Опубликовано: {novost['zagolovok'][:60]}")
+                log(f"  ✅ Опубликовано!")
                 return True
             else:
                 log(f"  ✗ Ошибка публикации, ищу следующую...")
                 continue
-                
-    log(f"  ⚠ Перебран весь пул, подходящих новостей с медиа не найдено.")
+    
+    log("  ⚠ Не подошло.")
     return False
 
 
 if __name__ == "__main__":
     log("Запуск бота...")
     
-    if False:  # Отключено: random.random() < 0.2:
-        log(" Случайный пропуск.")
-        sys.exit(0)
+    log("🚀 Начинаю поиск мировых новостей...")
     
-    log("🚀 Начинаю глубокий поиск и публикацию...")
-    
-    world_ok = obrabotat_kanal("Мировые", TG_BOT_TOKEN_WORLD, TG_CHAT_WORLD, RSS_WORLD, False)
-    krim_ok = obrabotat_kanal("Криминал", TG_BOT_TOKEN_KRIM, TG_CHAT_KRIM, SOURCES_KRIM, True)
-    
-    if world_ok or krim_ok:
+    if obrabotat_kanal():
         log("✅ Успешно опубликовано!")
     else:
         log("⚠ Не удалось опубликовать ни одной новости.")
