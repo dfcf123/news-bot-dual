@@ -8,6 +8,9 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 import vk_api
 import subprocess
+import json
+from PIL import Image, ImageDraw, ImageFont
+import io
 
 VK_ACCESS_TOKEN = os.environ.get("VK_ACCESS_TOKEN", "")
 VK_GROUP_ID = os.environ.get("VK_GROUP_ID", "-183445484")
@@ -33,6 +36,16 @@ HEADERS = {
 }
 
 AD_MARKERS = ["подпишись", "реклама", "акция", "скидка", "промокод", "купи", "закажи", "сундук али", "ali-баб", "партнерский материал"]
+
+# Градиенты для карточек (начальный и конечный цвет)
+GRADIENTS = [
+    ((66, 134, 244), (119, 94, 200)),    # Синий → Фиолетовый
+    ((233, 69, 96), (225, 48, 108)),     # Красный → Розовый
+    ((0, 188, 212), (0, 150, 136)),      # Голубой → Бирюзовый
+    ((255, 152, 0), (255, 87, 34)),      # Оранжевый → Красный
+    ((76, 175, 80), (56, 142, 60)),      # Зеленый → Темно-зеленый
+    ((156, 39, 176), (103, 58, 183)),    # Фиолетовый → Индиго
+]
 
 def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -88,6 +101,164 @@ def clean_text(text):
         clean_lines.append(line)
     return '\n'.join(clean_lines)
 
+def create_gradient_card(title, is_iphone=False):
+    """Создает красивую карточку с градиентом и заголовком"""
+    try:
+        # Параметры карточки
+        width, height = 1200, 630
+        padding = 60
+        
+        # Выбираем случайный градиент
+        gradient = random.choice(GRADIENTS)
+        color_start = gradient[0]
+        color_end = gradient[1]
+        
+        # Создаем изображение с градиентом
+        img = Image.new('RGB', (width, height), color_start)
+        draw = ImageDraw.Draw(img)
+        
+        # Рисуем градиент
+        for y in range(height):
+            r = int(color_start[0] + (color_end[0] - color_start[0]) * y / height)
+            g = int(color_start[1] + (color_end[1] - color_start[1]) * y / height)
+            b = int(color_start[2] + (color_end[2] - color_start[2]) * y / height)
+            draw.line([(0, y), (width, y)], fill=(r, g, b))
+        
+        # Добавляем полупрозрачный оверлей
+        overlay = Image.new('RGBA', (width, height), (0, 0, 0, 40))
+        img = Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
+        draw = ImageDraw.Draw(img)
+        
+        # Эмодзи
+        emoji = "🍎" if is_iphone else "🤖"
+        
+        # Пытаемся загрузить шрифты (системные)
+        try:
+            font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 56)
+            font_emoji = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 72)
+            font_source = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 32)
+        except:
+            # Fallback на стандартный шрифт
+            font_title = ImageFont.load_default()
+            font_emoji = ImageFont.load_default()
+            font_source = ImageFont.load_default()
+        
+        # Рисуем эмодзи
+        draw.text((padding, padding), emoji, fill=(255, 255, 255), font=font_emoji)
+        
+        # Обрезаем заголовок если слишком длинный
+        max_chars = 70
+        if len(title) > max_chars:
+            title = title[:max_chars-3] + "..."
+        
+        # Рисуем заголовок (перенос строк)
+        words = title.split()
+        lines = []
+        current_line = ""
+        
+        for word in words:
+            test_line = current_line + " " + word if current_line else word
+            # Примерная проверка длины
+            if len(test_line) < 60:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+        if current_line:
+            lines.append(current_line)
+        
+        # Рисуем строки заголовка
+        y_offset = padding + 100
+        for line in lines[:3]:  # Максимум 3 строки
+            draw.text((padding, y_offset), line, fill=(255, 255, 255), font=font_title)
+            y_offset += 70
+        
+        # Добавляем логотип/подпись внизу
+        source_text = "Лучшее на ANDROID и IPHONE"
+        draw.text((padding, height - 80), source_text, fill=(255, 255, 255, 180), font=font_source)
+        
+        # Сохраняем во временный файл
+        temp_file = f"/tmp/vk_card_{int(time.time())}_{random.randint(1000, 9999)}.png"
+        img.save(temp_file, 'PNG', quality=95)
+        
+        log(f"   Создана карточка: {width}x{height}px")
+        return temp_file
+        
+    except Exception as e:
+        log(f"  ⚠ Ошибка создания карточки: {e}")
+        return None
+
+def extract_all_images(soup, url):
+    """Извлекает ВСЕ возможные источники картинок со страницы"""
+    images = []
+    
+    # 1. Open Graph (og:image)
+    og = soup.find('meta', property='og:image')
+    if og and og.get('content'):
+        images.append({'url': og['content'], 'source': 'og:image', 'priority': 1})
+    
+    # 2. Twitter Card
+    tw = soup.find('meta', attrs={'name': 'twitter:image'})
+    if tw and tw.get('content'):
+        images.append({'url': tw['content'], 'source': 'twitter:image', 'priority': 1})
+    
+    # 3. JSON-LD (Schema.org)
+    for script in soup.find_all('script', type='application/ld+json'):
+        try:
+            data = json.loads(script.string)
+            if 'image' in data:
+                if isinstance(data['image'], str):
+                    images.append({'url': data['image'], 'source': 'json-ld', 'priority': 2})
+                elif isinstance(data['image'], list) and len(data['image']) > 0:
+                    images.append({'url': data['image'][0], 'source': 'json-ld', 'priority': 2})
+                elif isinstance(data['image'], dict) and 'url' in data['image']:
+                    images.append({'url': data['image']['url'], 'source': 'json-ld', 'priority': 2})
+        except:
+            pass
+    
+    # 4. Microdata (itemprop="image")
+    for img in soup.find_all(attrs={'itemprop': 'image'}):
+        src = img.get('content') or img.get('src')
+        if src:
+            images.append({'url': src, 'source': 'microdata', 'priority': 2})
+    
+    # 5. Первая большая картинка в article
+    article = soup.find('article') or soup.find('div', class_=re.compile(r'article|content|post', re.I))
+    if article:
+        for img in article.find_all('img', src=True):
+            src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+            if src:
+                width = img.get('width') or img.get('data-width', '0')
+                height = img.get('height') or img.get('data-height', '0')
+                try:
+                    if int(width) > 200 and int(height) > 200:
+                        images.append({'url': src, 'source': 'article-img', 'priority': 3})
+                except:
+                    if not any(x in src.lower() for x in ['logo', 'icon', 'avatar', 'sprite', 'thumb']):
+                        images.append({'url': src, 'source': 'article-img', 'priority': 3})
+    
+    # 6. Все картинки с class содержащим 'main', 'featured', 'hero'
+    for img in soup.find_all('img', class_=re.compile(r'main|featured|hero|primary', re.I)):
+        src = img.get('src') or img.get('data-src')
+        if src:
+            images.append({'url': src, 'source': 'class-match', 'priority': 2})
+    
+    # Сортируем по приоритету
+    images.sort(key=lambda x: x['priority'])
+    
+    cleaned = []
+    for img in images:
+        url_clean = img['url']
+        if url_clean.startswith('//'):
+            url_clean = 'https:' + url_clean
+        elif url_clean.startswith('/'):
+            url_clean = url.split('/')[0] + '//' + url.split('/')[2] + url_clean
+        if len(url_clean) > 10 and url_clean not in cleaned:
+            cleaned.append(url_clean)
+    
+    return cleaned
+
 def get_article_content(url):
     try:
         r = requests.get(url, headers=HEADERS, timeout=20)
@@ -95,27 +266,10 @@ def get_article_content(url):
             return None, None
         
         soup = BeautifulSoup(r.content, 'html.parser')
-        image_url = None
+        all_images = extract_all_images(soup, url)
+        log(f"   Найдено картинок: {len(all_images)}")
         
-        og = soup.find('meta', property='og:image')
-        if og and og.get('content'):
-            image_url = og['content']
-            
-        if not image_url:
-            article = soup.find('article') or soup.find('div', class_=re.compile(r'article|content|post', re.I))
-            if article:
-                for img in article.find_all('img', src=True):
-                    src = img.get('src') or img.get('data-src')
-                    if not src:
-                        continue
-                    if src.startswith('//'):
-                        src = 'https:' + src
-                    elif src.startswith('/'):
-                        src = url.split('/')[0] + '//' + url.split('/')[2] + src
-                    if len(src) > 10 and not any(x in src.lower() for x in ['logo', 'icon', 'avatar', 'sprite']):
-                        image_url = src
-                        break
-        
+        # Извлекаем текст
         text = ""
         content = soup.find('article') or soup.find('div', class_=re.compile(r'article|content|entry-content', re.I))
         if content:
@@ -137,8 +291,10 @@ def get_article_content(url):
             last_nl = text.rfind('\n\n')
             if last_nl > 500:
                 text = text[:last_nl] + "\n\n..."
-            
-        return text if len(text) > 100 else None, image_url
+        
+        main_image = all_images[0] if all_images else None
+        
+        return text if len(text) > 100 else None, main_image
     except Exception as e:
         log(f"  ⚠ Ошибка парсинга {url}: {e}")
         return None, None
@@ -199,32 +355,35 @@ def fetch_news():
 
 def download_image(url):
     try:
+        log(f"  ⬇️ Скачиваю: {url[:80]}...")
         r = requests.get(url, headers=HEADERS, timeout=15)
         if r.status_code != 200:
+            log(f"  ⚠ Статус {r.status_code}")
             return None
-        if len(r.content) < 10000 or len(r.content) > 10 * 1024 * 1024:
+        if len(r.content) < 10000:
+            log(f"  ⚠ Картинка слишком маленькая ({len(r.content)} байт)")
+            return None
+        if len(r.content) > 10 * 1024 * 1024:
+            log(f"  ⚠ Картинка слишком большая")
             return None
         
         ext = '.png' if 'png' in r.headers.get('content-type', '').lower() else '.jpg'
         temp_file = f"/tmp/vk_img_{int(time.time())}_{random.randint(1000, 9999)}{ext}"
         with open(temp_file, 'wb') as f:
             f.write(r.content)
-        log(f"  ✓ Картинка скачана: {len(r.content) // 1024} КБ")
+        log(f"  ✓ Скачано: {len(r.content) // 1024} КБ")
         return temp_file
     except Exception as e:
-        log(f"  ⚠ Ошибка скачивания картинки: {e}")
+        log(f"  ⚠ Ошибка скачивания: {e}")
         return None
 
 def upload_photo_to_vk(vk, group_id_int, temp_file):
-    """Загружает фото через upload URL для стены"""
     try:
-        # Получаем URL для загрузки
         upload_server = vk.photos.getWallUploadServer(group_id=group_id_int)
         upload_url = upload_server['upload_url']
         
-        log(f"  📤 Загружаю фото на сервер ВК...")
+        log(f"  📤 Загружаю на сервер ВК...")
         
-        # Загружаем файл
         with open(temp_file, 'rb') as f:
             files = {'photo': f}
             response = requests.post(upload_url, files=files)
@@ -232,11 +391,10 @@ def upload_photo_to_vk(vk, group_id_int, temp_file):
         upload_data = response.json()
         
         if 'photo' not in upload_data or 'server' not in upload_data or 'hash' not in upload_data:
-            log(f"  ⚠ Ошибка: сервер не вернул нужные данные: {upload_data}")
+            log(f"   Ошибка: {upload_data}")
             return None
         
-        # Сохраняем фото
-        log(f"  💾 Сохраняю фото в ВК...")
+        log(f"  💾 Сохраняю фото...")
         saved_photo = vk.photos.saveWallPhoto(
             group_id=group_id_int,
             photo=upload_data['photo'],
@@ -246,10 +404,10 @@ def upload_photo_to_vk(vk, group_id_int, temp_file):
         
         if saved_photo and len(saved_photo) > 0:
             photo_id = f"photo{saved_photo[0]['owner_id']}_{saved_photo[0]['id']}"
-            log(f"  ✓ Фото сохранено: {photo_id}")
+            log(f"  ✓ Фото: {photo_id}")
             return photo_id
         else:
-            log(f"  ⚠ Ошибка сохранения фото: {saved_photo}")
+            log(f"  ⚠ Ошибка сохранения")
             return None
             
     except Exception as e:
@@ -275,8 +433,10 @@ def post_to_vk(news_item):
         attachment = None
         temp_file = None
         
+        is_iphone = any(k in (news_item['title'] + news_item['text']).lower() for k in IPHONE_KEYWORDS)
+        
         if news_item.get('image'):
-            log(f"  🖼 Найдено фото: {news_item['image'][:80]}...")
+            log(f"  🖼 Нашёл фото: {news_item['image'][:80]}...")
             temp_file = download_image(news_item['image'])
             
             if temp_file:
@@ -289,9 +449,36 @@ def post_to_vk(news_item):
                     pass
                 
                 if attachment:
-                    log(f"  ✅ Фото загружено успешно!")
+                    log(f"  ✅ Фото загружено!")
                 else:
-                    log(f"  ⚠ Публикуем без фото")
+                    log(f"   Создаю текстовую карточку...")
+                    temp_file = create_gradient_card(news_item['title'], is_iphone)
+                    if temp_file:
+                        attachment = upload_photo_to_vk(vk, group_id_int, temp_file)
+                        try:
+                            os.remove(temp_file)
+                        except:
+                            pass
+            else:
+                log(f"  ⚠ Не удалось скачать фото. Создаю карточку...")
+                temp_file = create_gradient_card(news_item['title'], is_iphone)
+                if temp_file:
+                    group_id_int = int(VK_GROUP_ID.lstrip('-'))
+                    attachment = upload_photo_to_vk(vk, group_id_int, temp_file)
+                    try:
+                        os.remove(temp_file)
+                    except:
+                        pass
+        else:
+            log(f"   Фото не найдено. Создаю текстовую карточку...")
+            temp_file = create_gradient_card(news_item['title'], is_iphone)
+            if temp_file:
+                group_id_int = int(VK_GROUP_ID.lstrip('-'))
+                attachment = upload_photo_to_vk(vk, group_id_int, temp_file)
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
         
         log(f"  📝 Публикую пост...")
         vk.wall.post(
@@ -309,11 +496,11 @@ def post_to_vk(news_item):
 
 def main():
     log("=" * 60)
-    log("VK News Bot - Оптимизирован для GitHub Actions")
+    log("VK News Bot - с генерацией карточек")
     log("=" * 60)
     
     if not VK_ACCESS_TOKEN or "ВСТАВЬТЕ" in VK_ACCESS_TOKEN or not VK_GROUP_ID.startswith('-'):
-        log(" Ошибка настроек!")
+        log("❌ Ошибка настроек!")
         return
     
     try:
