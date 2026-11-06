@@ -1,12 +1,10 @@
-name: Kriminal Bot
+name: Criminal News Bot
 
 on:
   schedule:
+    # Запуск каждый час в 00 минут
     - cron: '0 * * * *'
-  workflow_dispatch:
-
-permissions:
-  contents: write
+  workflow_dispatch:  # Позволяет запускать вручную
 
 jobs:
   run-bot:
@@ -23,7 +21,7 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements.txt
 
-      - name: Run kriminal bot
+      - name: Run criminal bot
         env:
           TG_BOT_TOKEN_KRIM: ${{ secrets.TG_BOT_TOKEN_KRIM }}
           TG_CHAT_KRIM: ${{ secrets.TG_CHAT_KRIM }}
